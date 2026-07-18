@@ -1,9 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:my_todo/main.dart';
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   testWidgets('显示待办清单', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
@@ -58,5 +65,46 @@ void main() {
     taskText = tester.widget<Text>(find.text('买菜'));
     expect(taskText.style?.decoration, TextDecoration.none);
     expect(taskText.style?.color, isNull);
+  });
+
+  testWidgets('启动时读取已保存的任务', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {'title': '已保存任务', 'isDone': true},
+      ]),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('已保存任务'), findsOneWidget);
+    expect(find.text('买菜'), findsNothing);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+  });
+
+  testWidgets('添加、勾选和删除任务后自动保存', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '持久化任务');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    SharedPreferences preferences = await SharedPreferences.getInstance();
+    List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last, {'title': '持久化任务', 'isDone': false});
+
+    await tester.tap(find.byType(Checkbox).last);
+    await tester.pumpAndSettle();
+    preferences = await SharedPreferences.getInstance();
+    savedTasks = jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last, {'title': '持久化任务', 'isDone': true});
+
+    await tester.tap(find.byIcon(Icons.delete_outline).last);
+    await tester.pumpAndSettle();
+    preferences = await SharedPreferences.getInstance();
+    savedTasks = jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.where((task) => task['title'] == '持久化任务'), isEmpty);
   });
 }

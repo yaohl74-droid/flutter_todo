@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MyApp());
@@ -26,6 +29,17 @@ class Task {
 
   final String title;
   bool isDone;
+
+  // 把 Task 转成可被 JSON 编码的 Map，便于保存到本地。
+  Map<String, dynamic> toJson() => {'title': title, 'isDone': isDone};
+
+  // 从 JSON Map 还原 Task，让保存的数据能重新变成应用中的对象。
+  factory Task.fromJson(Map<String, dynamic> json) {
+    return Task(
+      title: json['title'] as String,
+      isDone: json['isDone'] as bool? ?? false,
+    );
+  }
 }
 
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
@@ -38,6 +52,8 @@ class TodoPage extends StatefulWidget {
 }
 
 class _TodoPageState extends State<TodoPage> {
+  static const String _tasksStorageKey = 'tasks';
+
   final List<Task> _tasks = [
     Task(title: '买菜'),
     Task(title: '写代码'),
@@ -45,7 +61,53 @@ class _TodoPageState extends State<TodoPage> {
   ];
   final TextEditingController _taskController = TextEditingController();
 
-  void _addTask() {
+  @override
+  void initState() {
+    super.initState();
+    // initState 是 State 创建后只执行一次的初始化方法，适合在页面启动时读取存档。
+    // initState 本身不能标记为 async，所以把异步读取放到单独的方法中调用。
+    _loadTasks();
+  }
+
+  Future<void> _loadTasks() async {
+    // 本地存储读写需要时间并返回 Future，因此用 async/await 等待结果，
+    // 避免在数据尚未读取完成时就继续处理它。
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final String? tasksJson = preferences.getString(_tasksStorageKey);
+
+    // 没有存档说明是首次启动，继续使用上面的示例任务。
+    if (tasksJson == null) {
+      return;
+    }
+
+    final List<dynamic> decodedTasks = jsonDecode(tasksJson) as List<dynamic>;
+    final List<Task> savedTasks = decodedTasks
+        .map((json) => Task.fromJson(Map<String, dynamic>.from(json as Map)))
+        .toList();
+
+    // 异步读取结束时页面可能已被销毁，mounted 可避免更新已销毁的 State。
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _tasks
+        ..clear()
+        ..addAll(savedTasks);
+    });
+  }
+
+  Future<void> _saveTasks() async {
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final String tasksJson = jsonEncode(
+      _tasks.map((task) => task.toJson()).toList(),
+    );
+
+    // await 保证本次写入完成后，调用方才继续执行。
+    await preferences.setString(_tasksStorageKey, tasksJson);
+  }
+
+  Future<void> _addTask() async {
     final String task = _taskController.text.trim();
 
     // 输入为空或只有空格时，不添加任务。
@@ -59,13 +121,22 @@ class _TodoPageState extends State<TodoPage> {
       _tasks.add(Task(title: task));
     });
     _taskController.clear();
+    await _saveTasks();
   }
 
-  void _toggleTask(Task task, bool? isDone) {
+  Future<void> _toggleTask(Task task, bool? isDone) async {
     // 完成状态属于页面数据，必须在 setState 中修改，界面才会重新构建。
     setState(() {
       task.isDone = isDone ?? false;
     });
+    await _saveTasks();
+  }
+
+  Future<void> _deleteTask(Task task) async {
+    setState(() {
+      _tasks.remove(task);
+    });
+    await _saveTasks();
   }
 
   @override
@@ -101,6 +172,11 @@ class _TodoPageState extends State<TodoPage> {
                           : TextDecoration.none,
                       color: task.isDone ? Colors.grey : null,
                     ),
+                  ),
+                  trailing: IconButton(
+                    tooltip: '删除任务',
+                    onPressed: () => _deleteTask(task),
+                    icon: const Icon(Icons.delete_outline),
                   ),
                 );
               }).toList(),

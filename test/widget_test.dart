@@ -13,6 +13,7 @@ void main() {
 
   testWidgets('显示待办清单', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
 
     expect(find.text('我的待办 (0/3)'), findsOneWidget);
     expect(find.text('买菜'), findsOneWidget);
@@ -20,6 +21,19 @@ void main() {
     expect(find.text('跑步'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(3));
     expect(find.byType(Card), findsNWidgets(3));
+    expect(find.byType(Dismissible), findsNWidgets(3));
+
+    final Iterable<Key?> dismissibleKeys = tester
+        .widgetList<Dismissible>(find.byType(Dismissible))
+        .map((widget) => widget.key);
+    expect(dismissibleKeys.toSet(), hasLength(3));
+
+    // 首次启动虽然展示的是内置示例，也必须立即写入本地存档。
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks, hasLength(3));
+    expect(savedTasks.map((task) => task['title']), ['买菜', '写代码', '跑步']);
   });
 
   testWidgets('添加非空任务并清空输入框', (WidgetTester tester) async {
@@ -124,18 +138,85 @@ void main() {
     SharedPreferences preferences = await SharedPreferences.getInstance();
     List<dynamic> savedTasks =
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
-    expect(savedTasks.last, {'title': '持久化任务', 'isDone': false});
+    expect(savedTasks.last, containsPair('title', '持久化任务'));
+    expect(savedTasks.last, containsPair('isDone', false));
+    expect(savedTasks.last['id'], isNotEmpty);
 
     await tester.tap(find.byType(Checkbox).last);
     await tester.pumpAndSettle();
     preferences = await SharedPreferences.getInstance();
     savedTasks = jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
-    expect(savedTasks.last, {'title': '持久化任务', 'isDone': true});
+    expect(savedTasks.last, containsPair('title', '持久化任务'));
+    expect(savedTasks.last, containsPair('isDone', true));
 
     await tester.tap(find.byIcon(Icons.delete_outline).last);
     await tester.pumpAndSettle();
     preferences = await SharedPreferences.getInstance();
     savedTasks = jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(savedTasks.where((task) => task['title'] == '持久化任务'), isEmpty);
+  });
+
+  testWidgets('左滑删除后可撤销并恢复原位置', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(Dismissible).first, const Offset(-500, 0));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    // 等待异步保存结束，以及 SnackBar 的入场动画完成。
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('买菜'), findsNothing);
+    expect(find.text('已删除 买菜'), findsOneWidget);
+    expect(find.text('撤销'), findsOneWidget);
+
+    await tester.tap(find.text('撤销'));
+    await tester.pump();
+
+    expect(find.text('买菜'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('买菜')).dy,
+      lessThan(tester.getTopLeft(find.text('写代码')).dy),
+    );
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.first['title'], '买菜');
+  });
+
+  test('旧版 JSON 没有 id 时自动补全并可再次序列化', () {
+    final Task task = Task.fromJson({'title': '旧任务', 'isDone': false});
+
+    expect(task.id, isNotEmpty);
+    expect(task.toJson()['id'], task.id);
+  });
+
+  testWidgets('兼容字符串旧存档并跳过缺少标题的记录', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        '字符串旧任务',
+        {'isDone': true},
+        {'title': '有效旧任务', 'isDone': true},
+      ]),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('字符串旧任务'), findsOneWidget);
+    expect(find.text('有效旧任务'), findsOneWidget);
+    expect(find.text('我的待办 (1/2)'), findsOneWidget);
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> migratedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(migratedTasks, hasLength(2));
+    expect(migratedTasks.every((task) => task['id'] != null), isTrue);
   });
 }

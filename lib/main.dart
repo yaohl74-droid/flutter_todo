@@ -33,19 +33,33 @@ class MyApp extends StatelessWidget {
 // String 只能保存任务文字，无法同时记录任务是否完成。
 // 改用 Task 后，每一项任务就能把文字和完成状态放在同一个数据结构中管理。
 class Task {
-  Task({required this.title, this.isDone = false});
+  Task({String? id, required this.title, this.isDone = false})
+    : id = id ?? _generateId();
 
+  static int _idSequence = 0;
+
+  // 时间戳加递增序号，即使同一微秒创建多个任务也能得到不同 ID。
+  static String _generateId() {
+    return '${DateTime.now().microsecondsSinceEpoch}-${_idSequence++}';
+  }
+
+  final String id;
   final String title;
   bool isDone;
 
   // 把 Task 转成可被 JSON 编码的 Map，便于保存到本地。
-  Map<String, dynamic> toJson() => {'title': title, 'isDone': isDone};
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'isDone': isDone};
 
   // 从 JSON Map 还原 Task，让保存的数据能重新变成应用中的对象。
   factory Task.fromJson(Map<String, dynamic> json) {
+    final String? savedId = json['id']?.toString();
+
     return Task(
-      title: json['title'] as String,
-      isDone: json['isDone'] as bool? ?? false,
+      // 旧版本 JSON 没有 id，此时传入 null，由构造函数自动补一个唯一 ID。
+      id: savedId == null || savedId.isEmpty ? null : savedId,
+      // 不再强制把 null 转成 String，避免损坏或旧数据导致启动崩溃。
+      title: json['title']?.toString() ?? '',
+      isDone: json['isDone'] == true,
     );
   }
 }
@@ -83,15 +97,60 @@ class _TodoPageState extends State<TodoPage> {
     final SharedPreferences preferences = await SharedPreferences.getInstance();
     final String? tasksJson = preferences.getString(_tasksStorageKey);
 
-    // 没有存档说明是首次启动，继续使用上面的示例任务。
+    // 没有存档说明是首次启动：显示示例任务，并立刻保存到用户设备。
     if (tasksJson == null) {
+      await _saveTasks();
       return;
     }
 
-    final List<dynamic> decodedTasks = jsonDecode(tasksJson) as List<dynamic>;
-    final List<Task> savedTasks = decodedTasks
-        .map((json) => Task.fromJson(Map<String, dynamic>.from(json as Map)))
-        .toList();
+    // 旧版本可能保存的是字符串数组；无效 JSON 则保留示例任务，不让 App 崩溃。
+    final dynamic decodedJson;
+    try {
+      decodedJson = jsonDecode(tasksJson);
+    } on FormatException {
+      return;
+    }
+
+    if (decodedJson is! List) {
+      return;
+    }
+
+    final List<Task> savedTasks = [];
+    final Set<String> usedIds = {};
+    bool needsMigration = false;
+
+    for (final dynamic item in decodedJson) {
+      Task? task;
+
+      if (item is String) {
+        // 兼容最早版本直接保存 List<String> 的格式。
+        task = Task(title: item);
+        needsMigration = true;
+      } else if (item is Map) {
+        final Map<String, dynamic> taskJson = Map<String, dynamic>.from(item);
+        task = Task.fromJson(taskJson);
+        if (taskJson['id'] == null || taskJson['id'].toString().isEmpty) {
+          needsMigration = true;
+        }
+      } else {
+        needsMigration = true;
+      }
+
+      // 缺少标题的损坏记录没有展示价值，安全跳过。
+      if (task == null || task.title.trim().isEmpty) {
+        needsMigration = true;
+        continue;
+      }
+
+      // 若旧数据中意外存在重复 ID，重新创建任务以获得新的唯一 ID。
+      if (!usedIds.add(task.id)) {
+        task = Task(title: task.title, isDone: task.isDone);
+        usedIds.add(task.id);
+        needsMigration = true;
+      }
+
+      savedTasks.add(task);
+    }
 
     // 异步读取结束时页面可能已被销毁，mounted 可避免更新已销毁的 State。
     if (!mounted) {
@@ -103,6 +162,11 @@ class _TodoPageState extends State<TodoPage> {
         ..clear()
         ..addAll(savedTasks);
     });
+
+    // 读取旧格式后立即写回新结构，下次启动即可直接使用带 ID 的 JSON。
+    if (needsMigration) {
+      await _saveTasks();
+    }
   }
 
   Future<void> _saveTasks() async {
@@ -150,8 +214,53 @@ class _TodoPageState extends State<TodoPage> {
   }
 
   Future<void> _deleteTask(Task task) async {
+    final int originalIndex = _tasks.indexOf(task);
+    if (originalIndex == -1) {
+      return;
+    }
+
     setState(() {
-      _tasks.remove(task);
+      _tasks.removeAt(originalIndex);
+    });
+
+    // 保存可以异步进行，但删除反馈应立即出现，不必等磁盘写入结束。
+    final Future<void> saveOperation = _saveTasks();
+
+    if (!mounted) {
+      await saveOperation;
+      return;
+    }
+
+    // 左滑和删除按钮共用提示；SnackBarAction 提供一次撤销机会。
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('已删除 ${task.title}'),
+          action: SnackBarAction(
+            label: '撤销',
+            onPressed: () => _restoreTask(task, originalIndex),
+          ),
+        ),
+      );
+
+    await saveOperation;
+  }
+
+  Future<void> _restoreTask(Task task, int originalIndex) async {
+    // SnackBar 的回调触发时页面可能已经销毁，必须先检查 mounted，
+    // 避免对已销毁的 State 调用 setState。
+    if (!mounted) {
+      return;
+    }
+
+    // 若撤销前列表又发生变化，确保插入位置仍在当前列表的有效范围内。
+    final int restoredIndex = originalIndex > _tasks.length
+        ? _tasks.length
+        : originalIndex;
+
+    setState(() {
+      _tasks.insert(restoredIndex, task);
     });
     await _saveTasks();
   }
@@ -209,32 +318,52 @@ class _TodoPageState extends State<TodoPage> {
                     itemBuilder: (context, index) {
                       final Task task = _tasks[index];
 
-                      // Card 的圆角和轻微阴影让每条任务层次更清晰。
-                      return Card(
-                        margin: EdgeInsets.zero,
-                        elevation: 2,
-                        shadowColor: Colors.black26,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
+                      // Dismissible 依靠 key 区分列表项并跟踪滑动动画；如果 key
+                      // 重复，Flutter 可能删除或复用错误的任务，所以必须使用唯一 ID。
+                      return Dismissible(
+                        key: ValueKey<String>(task.id),
+                        direction: DismissDirection.endToStart,
+                        onDismissed: (_) => _deleteTask(task),
+                        background: Container(
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.only(right: 24),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade400,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            Icons.delete,
+                            color: Colors.white,
+                            size: 30,
+                          ),
                         ),
-                        child: ListTile(
-                          leading: Checkbox(
-                            value: task.isDone,
-                            onChanged: (isDone) => _toggleTask(task, isDone),
+                        // Card 的圆角和轻微阴影让每条任务层次更清晰。
+                        child: Card(
+                          margin: EdgeInsets.zero,
+                          elevation: 2,
+                          shadowColor: Colors.black26,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
-                          title: Text(
-                            task.title,
-                            style: TextStyle(
-                              decoration: task.isDone
-                                  ? TextDecoration.lineThrough
-                                  : TextDecoration.none,
-                              color: task.isDone ? Colors.grey : null,
+                          child: ListTile(
+                            leading: Checkbox(
+                              value: task.isDone,
+                              onChanged: (isDone) => _toggleTask(task, isDone),
                             ),
-                          ),
-                          trailing: IconButton(
-                            tooltip: '删除任务',
-                            onPressed: () => _deleteTask(task),
-                            icon: const Icon(Icons.delete_outline),
+                            title: Text(
+                              task.title,
+                              style: TextStyle(
+                                decoration: task.isDone
+                                    ? TextDecoration.lineThrough
+                                    : TextDecoration.none,
+                                color: task.isDone ? Colors.grey : null,
+                              ),
+                            ),
+                            trailing: IconButton(
+                              tooltip: '删除任务',
+                              onPressed: () => _deleteTask(task),
+                              icon: const Icon(Icons.delete_outline),
+                            ),
                           ),
                         ),
                       );

@@ -19,6 +19,15 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// String 只能保存任务文字，无法同时记录任务是否完成。
+// 改用 Task 后，每一项任务就能把文字和完成状态放在同一个数据结构中管理。
+class Task {
+  Task({required this.title, this.isDone = false});
+
+  final String title;
+  bool isDone;
+}
+
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
@@ -29,7 +38,11 @@ class TodoPage extends StatefulWidget {
 }
 
 class _TodoPageState extends State<TodoPage> {
-  final List<String> _tasks = ['买菜', '写代码', '跑步'];
+  final List<Task> _tasks = [
+    Task(title: '买菜'),
+    Task(title: '写代码'),
+    Task(title: '跑步'),
+  ];
   final TextEditingController _taskController = TextEditingController();
 
   void _addTask() {
@@ -43,9 +56,16 @@ class _TodoPageState extends State<TodoPage> {
     // setState 告诉 Flutter 状态已经改变，需要重新执行 build 方法，
     // 这样新加入 _tasks 的任务才会显示在界面上。
     setState(() {
-      _tasks.add(task);
+      _tasks.add(Task(title: task));
     });
     _taskController.clear();
+  }
+
+  void _toggleTask(Task task, bool? isDone) {
+    // 完成状态属于页面数据，必须在 setState 中修改，界面才会重新构建。
+    setState(() {
+      task.isDone = isDone ?? false;
+    });
   }
 
   @override
@@ -69,8 +89,19 @@ class _TodoPageState extends State<TodoPage> {
               children: _tasks.map((task) {
                 // ListTile 是一行标准列表项，可方便地放置前置图标和标题文字。
                 return ListTile(
-                  leading: const Icon(Icons.radio_button_unchecked),
-                  title: Text(task),
+                  leading: Checkbox(
+                    value: task.isDone,
+                    onChanged: (isDone) => _toggleTask(task, isDone),
+                  ),
+                  title: Text(
+                    task.title,
+                    style: TextStyle(
+                      decoration: task.isDone
+                          ? TextDecoration.lineThrough
+                          : TextDecoration.none,
+                      color: task.isDone ? Colors.grey : null,
+                    ),
+                  ),
                 );
               }).toList(),
             ),

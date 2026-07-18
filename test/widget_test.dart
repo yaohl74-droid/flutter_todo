@@ -11,7 +11,7 @@ void main() {
     expect(find.text('买菜'), findsOneWidget);
     expect(find.text('写代码'), findsOneWidget);
     expect(find.text('跑步'), findsOneWidget);
-    expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(3));
+    expect(find.byType(Checkbox), findsNWidgets(3));
   });
 
   testWidgets('添加非空任务并清空输入框', (WidgetTester tester) async {
@@ -22,7 +22,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('学习 Flutter'), findsOneWidget);
-    expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(4));
+    expect(find.byType(Checkbox), findsNWidgets(4));
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       isEmpty,
@@ -36,6 +36,27 @@ void main() {
     await tester.tap(find.text('添加'));
     await tester.pump();
 
-    expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(3));
+    expect(find.byType(Checkbox), findsNWidgets(3));
+  });
+
+  testWidgets('点击复选框切换任务完成样式', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+
+    final Finder firstCheckbox = find.byType(Checkbox).first;
+    await tester.tap(firstCheckbox);
+    await tester.pump();
+
+    expect(tester.widget<Checkbox>(firstCheckbox).value, isTrue);
+    Text taskText = tester.widget<Text>(find.text('买菜'));
+    expect(taskText.style?.decoration, TextDecoration.lineThrough);
+    expect(taskText.style?.color, Colors.grey);
+
+    await tester.tap(firstCheckbox);
+    await tester.pump();
+
+    expect(tester.widget<Checkbox>(firstCheckbox).value, isFalse);
+    taskText = tester.widget<Text>(find.text('买菜'));
+    expect(taskText.style?.decoration, TextDecoration.none);
+    expect(taskText.style?.color, isNull);
   });
 }

@@ -1,17 +1,186 @@
-# my_todo
+# 我的待办
 
-A new Flutter project.
+一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持添加任务、标记完成、删除与撤销，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
 
-## Getting Started
+## 功能
 
-This project is a starting point for a Flutter application.
+- AppBar 实时显示任务进度：`我的待办 (已完成/总数)`。
+- 首次启动显示“买菜、写代码、跑步”三条示例任务，并立即保存到本地。
+- 支持点击“添加”按钮或按键盘回车提交任务。
+- 输入内容会去除首尾空格；空内容或纯空格不会创建任务。
+- 添加成功后显示 SnackBar 提示“已添加”。
+- 每条任务使用可点击的 Checkbox 切换完成状态。
+- 已完成任务显示灰色文字和删除线，顶部统计同步更新。
+- 支持两种删除方式：
+  - 向左滑动任务卡片；滑动背景显示红色和白色垃圾桶图标。
+  - 点击任务右侧原有的删除按钮。
+- 删除后显示“已删除 xxx”，点击“撤销”可将任务恢复到删除前的位置。
+- 当任务列表为空时，页面中央显示大图标和“还没有任务,添加一条吧”。
+- 添加、勾选、删除和撤销操作都会自动保存。
+- 使用柔和绿色主题；输入框获得焦点时显示绿色高亮边框。
+- 任务使用带圆角和轻微阴影的 Card 展示，卡片之间保留间距。
 
-A few resources to get you started if this is your first Flutter project:
+## 数据结构
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+任务不使用单独的 `String` 保存，而是使用 `Task`：
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```dart
+class Task {
+  final String id;
+  final String title;
+  bool isDone;
+}
+```
+
+- `id`：任务的唯一标识，由微秒时间戳和递增序号生成。
+- `title`：任务文字。
+- `isDone`：任务是否完成。
+
+使用 `Task` 是因为字符串只能保存任务文字，无法同时表达完成状态和唯一身份。`Task.toJson()` 和 `Task.fromJson()` 负责对象与 JSON Map 之间的转换。保存后的单条数据类似：
+
+```json
+{
+  "id": "1752800000000000-0",
+  "title": "买菜",
+  "isDone": false
+}
+```
+
+每个任务卡片由 `Dismissible` 包裹，并使用 `ValueKey(task.id)`。这个 key 必须唯一，否则 Flutter 在列表更新和滑动动画期间可能复用、移动或删除错误的任务组件。
+
+## 本地持久化
+
+项目使用 [`shared_preferences`](https://pub.dev/packages/shared_preferences) 保存数据：
+
+- 存储键：`tasks`
+- 存储值：整个任务数组编码后的 JSON 字符串
+- 启动读取：`TodoPage.initState()` 调用异步 `_loadTasks()`
+- 自动写入：添加、切换完成状态、删除和撤销后调用 `_saveTasks()`
+- 首次运行：没有 `tasks` 存档时，把三条示例任务立即写入本地
+
+`initState` 是 `State` 创建后只执行一次的初始化方法，因此适合启动读取。它本身不能声明为 `async`，所以实际异步工作放在单独方法中，并使用 `async/await` 等待读写完成。
+
+异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。撤销回调也在恢复任务前执行该检查。
+
+### 旧数据兼容与迁移
+
+修改数据结构时必须确认：**用户设备上的旧数据，新代码读得动吗？** 当前加载逻辑包含以下兼容处理：
+
+- 兼容早期直接保存的 `List<String>`，读取后转换为 `Task`。
+- 兼容只有 `title` 和 `isDone`、没有 `id` 的旧任务，并自动生成 ID。
+- 空字符串 ID 会被视为缺失并重新生成。
+- 重复 ID 会被修复，保证 `Dismissible` key 唯一。
+- 缺少或无法提供有效 `title` 的损坏记录会被跳过。
+- `isDone` 缺失或不是布尔值 `true` 时按未完成处理。
+- 旧格式成功读取后会立即写回当前 JSON 结构，完成迁移。
+- JSON 格式损坏或根节点不是数组时不会让 App 崩溃，会保留内存中的示例任务。
+
+## 平台支持
+
+项目包含以下 Flutter 平台目录，`shared_preferences` 会自动使用对应的平台实现：
+
+- Android（手机和平板）
+- iOS（iPhone 和 iPad）
+- Web
+- macOS
+- Windows
+- Linux
+
+数据保存在当前设备和当前应用的本地存储中，不是云同步：
+
+- 不同设备之间不会自动共享任务。
+- 卸载 App、清除应用数据或清除浏览器站点数据后，本地任务可能丢失。
+
+## 环境与安装
+
+项目当前要求 Dart SDK `^3.12.2`，Flutter 版本需要提供兼容的 Dart SDK。
+
+克隆项目后安装依赖：
+
+```bash
+flutter pub get
+```
+
+如果在其他项目中单独安装持久化依赖，可运行：
+
+```bash
+flutter pub add shared_preferences
+```
+
+当前使用的主要依赖：
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.5
+```
+
+## 运行
+
+查看可用设备：
+
+```bash
+flutter devices
+```
+
+在已选择或默认设备上运行：
+
+```bash
+flutter run
+```
+
+也可以指定目标，例如：
+
+```bash
+flutter run -d chrome
+flutter run -d macos
+```
+
+其他平台需先完成对应的 Flutter 桌面或移动端开发环境配置。
+
+## 测试与代码检查
+
+运行组件和数据兼容测试：
+
+```bash
+flutter test
+```
+
+运行静态分析：
+
+```bash
+flutter analyze
+```
+
+当前测试覆盖：
+
+- 首次启动显示并保存三条示例任务
+- 添加任务、清空输入框和拦截空输入
+- 点击按钮与按回车添加任务
+- 添加成功 SnackBar
+- Checkbox 完成状态、删除线、灰色样式及任务统计
+- 从本地存档恢复任务
+- 空列表引导界面
+- 添加、勾选和删除后的自动持久化
+- 左滑删除、删除提示、撤销及恢复原位置
+- `Dismissible` key 唯一性
+- 旧 JSON 缺少 ID 时自动补全
+- 旧字符串数组迁移和损坏记录容错
+
+## 项目结构
+
+```text
+lib/main.dart          App 入口、Task 模型、页面、交互及持久化逻辑
+test/widget_test.dart  Widget 测试、持久化测试和旧数据兼容测试
+pubspec.yaml           Flutter 配置与依赖
+android/               Android 工程
+ios/                   iOS 工程
+web/                   Web 工程
+macos/                 macOS 工程
+windows/               Windows 工程
+linux/                 Linux 工程
+```
+
+当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后异步写入本地存储。

@@ -14,8 +14,16 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '我的待办',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        // 用低饱和度绿色作为种子色，生成统一、柔和的 Material 配色。
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF6F9D7A)),
+        scaffoldBackgroundColor: const Color(0xFFF4F8F4),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFE5F1E7),
+          foregroundColor: Color(0xFF294E32),
+          elevation: 0,
+        ),
       ),
       home: const TodoPage(),
     );
@@ -122,6 +130,15 @@ class _TodoPageState extends State<TodoPage> {
     });
     _taskController.clear();
     await _saveTasks();
+
+    if (!mounted) {
+      return;
+    }
+
+    // 添加成功后给用户一个短暂反馈，不会打断继续输入。
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已添加')));
   }
 
   Future<void> _toggleTask(Task task, bool? isDone) async {
@@ -148,39 +165,81 @@ class _TodoPageState extends State<TodoPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 每次状态变化重新 build 时统计，标题会立即反映最新完成进度。
+    final int completedCount = _tasks.where((task) => task.isDone).length;
+
     // Scaffold 是 Material Design 页面结构，提供 AppBar、主体等常用区域。
     return Scaffold(
-      appBar: AppBar(title: const Text('我的待办')),
+      appBar: AppBar(
+        title: Text('我的待办 ($completedCount/${_tasks.length})'),
+        centerTitle: true,
+      ),
       body: Column(
         children: [
           // Expanded 让任务列表占满输入区域之外的剩余空间。
           Expanded(
-            // ListView 是可滚动的列表组件，会按顺序纵向排列多个子组件。
-            child: ListView(
-              children: _tasks.map((task) {
-                // ListTile 是一行标准列表项，可方便地放置前置图标和标题文字。
-                return ListTile(
-                  leading: Checkbox(
-                    value: task.isDone,
-                    onChanged: (isDone) => _toggleTask(task, isDone),
-                  ),
-                  title: Text(
-                    task.title,
-                    style: TextStyle(
-                      decoration: task.isDone
-                          ? TextDecoration.lineThrough
-                          : TextDecoration.none,
-                      color: task.isDone ? Colors.grey : null,
+            child: _tasks.isEmpty
+                // 空列表时用图标和提示文字引导用户添加第一条任务。
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.task_alt,
+                          size: 88,
+                          color: Color(0xFF8AAF91),
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          '还没有任务,添加一条吧',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Color(0xFF66806C),
+                          ),
+                        ),
+                      ],
                     ),
+                  )
+                // ListView.separated 统一控制卡片之间的留白。
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    itemCount: _tasks.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final Task task = _tasks[index];
+
+                      // Card 的圆角和轻微阴影让每条任务层次更清晰。
+                      return Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 2,
+                        shadowColor: Colors.black26,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: ListTile(
+                          leading: Checkbox(
+                            value: task.isDone,
+                            onChanged: (isDone) => _toggleTask(task, isDone),
+                          ),
+                          title: Text(
+                            task.title,
+                            style: TextStyle(
+                              decoration: task.isDone
+                                  ? TextDecoration.lineThrough
+                                  : TextDecoration.none,
+                              color: task.isDone ? Colors.grey : null,
+                            ),
+                          ),
+                          trailing: IconButton(
+                            tooltip: '删除任务',
+                            onPressed: () => _deleteTask(task),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  trailing: IconButton(
-                    tooltip: '删除任务',
-                    onPressed: () => _deleteTask(task),
-                    icon: const Icon(Icons.delete_outline),
-                  ),
-                );
-              }).toList(),
-            ),
           ),
           SafeArea(
             top: false,
@@ -191,9 +250,24 @@ class _TodoPageState extends State<TodoPage> {
                   Expanded(
                     child: TextField(
                       controller: _taskController,
+                      textInputAction: TextInputAction.done,
+                      // onSubmitted 让软键盘的“完成/回车”与添加按钮作用相同。
+                      onSubmitted: (_) => _addTask(),
                       decoration: const InputDecoration(
                         hintText: '请输入任务',
-                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(14)),
+                        ),
+                        // 获得焦点时用更粗的绿色边框高亮输入区域。
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(14)),
+                          borderSide: BorderSide(
+                            color: Color(0xFF4F8A5B),
+                            width: 2,
+                          ),
+                        ),
                       ),
                     ),
                   ),

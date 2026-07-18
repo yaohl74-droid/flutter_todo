@@ -14,11 +14,12 @@ void main() {
   testWidgets('显示待办清单', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
-    expect(find.text('我的待办'), findsOneWidget);
+    expect(find.text('我的待办 (0/3)'), findsOneWidget);
     expect(find.text('买菜'), findsOneWidget);
     expect(find.text('写代码'), findsOneWidget);
     expect(find.text('跑步'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(3));
+    expect(find.byType(Card), findsNWidgets(3));
   });
 
   testWidgets('添加非空任务并清空输入框', (WidgetTester tester) async {
@@ -29,6 +30,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('学习 Flutter'), findsOneWidget);
+    expect(find.text('我的待办 (0/4)'), findsOneWidget);
+    expect(find.text('已添加'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(4));
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
@@ -54,6 +57,7 @@ void main() {
     await tester.pump();
 
     expect(tester.widget<Checkbox>(firstCheckbox).value, isTrue);
+    expect(find.text('我的待办 (1/3)'), findsOneWidget);
     Text taskText = tester.widget<Text>(find.text('买菜'));
     expect(taskText.style?.decoration, TextDecoration.lineThrough);
     expect(taskText.style?.color, Colors.grey);
@@ -62,6 +66,7 @@ void main() {
     await tester.pump();
 
     expect(tester.widget<Checkbox>(firstCheckbox).value, isFalse);
+    expect(find.text('我的待办 (0/3)'), findsOneWidget);
     taskText = tester.widget<Text>(find.text('买菜'));
     expect(taskText.style?.decoration, TextDecoration.none);
     expect(taskText.style?.color, isNull);
@@ -80,6 +85,32 @@ void main() {
     expect(find.text('已保存任务'), findsOneWidget);
     expect(find.text('买菜'), findsNothing);
     expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+    expect(find.text('我的待办 (1/1)'), findsOneWidget);
+  });
+
+  testWidgets('空列表显示引导提示', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({'tasks': '[]'});
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('我的待办 (0/0)'), findsOneWidget);
+    expect(find.byIcon(Icons.task_alt), findsOneWidget);
+    expect(find.text('还没有任务,添加一条吧'), findsOneWidget);
+    expect(find.byType(Card), findsNothing);
+  });
+
+  testWidgets('按回车提交任务并显示提示', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '回车添加');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(find.text('回车添加'), findsOneWidget);
+    expect(find.text('已添加'), findsOneWidget);
+    expect(find.text('我的待办 (0/4)'), findsOneWidget);
   });
 
   testWidgets('添加、勾选和删除任务后自动保存', (WidgetTester tester) async {

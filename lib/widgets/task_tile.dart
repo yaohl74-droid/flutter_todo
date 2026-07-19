@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/task.dart';
+import '../utils/date_format.dart';
 
 /// 单条任务的纯展示组件；所有修改动作都通过回调交还页面 State。
 class TaskTile extends StatelessWidget {
@@ -20,41 +21,6 @@ class TaskTile extends StatelessWidget {
   final ValueChanged<bool?> onToggle;
   final VoidCallback onDelete;
   final VoidCallback onEdit;
-
-  String _formatDateTime(DateTime date) {
-    final DateTime localDate = date.toLocal();
-    final String month = localDate.month.toString().padLeft(2, '0');
-    final String day = localDate.day.toString().padLeft(2, '0');
-    final String hour = localDate.hour.toString().padLeft(2, '0');
-    final String minute = localDate.minute.toString().padLeft(2, '0');
-    return '${localDate.year}-$month-$day $hour:$minute';
-  }
-
-  bool get _isOverdue {
-    if (task.isDone || task.dueDate == null) {
-      return false;
-    }
-
-    final DateTime localDueDate = task.dueDate!.toLocal();
-    final DateTime dueMinute = DateTime(
-      localDueDate.year,
-      localDueDate.month,
-      localDueDate.day,
-      localDueDate.hour,
-      localDueDate.minute,
-    );
-    final DateTime now = DateTime.now();
-    final DateTime currentMinute = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      now.hour,
-      now.minute,
-    );
-
-    // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
-    return dueMinute.isBefore(currentMinute);
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,9 +70,9 @@ class TaskTile extends StatelessWidget {
             subtitle: task.dueDate == null
                 ? null
                 : Text(
-                    '截止日期：${_formatDateTime(task.dueDate!)}',
+                    '截止日期：${formatDateTime(task.dueDate!)}',
                     style: TextStyle(
-                      color: _isOverdue ? Colors.red : Colors.grey.shade600,
+                      color: task.isOverdue ? Colors.red : Colors.grey.shade600,
                     ),
                   ),
             trailing: Row(

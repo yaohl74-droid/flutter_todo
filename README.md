@@ -59,6 +59,7 @@ class Task {
 - `isDone`：任务是否完成。
 - `dueDate`：可空的截止绝对时刻；内存和存档中统一使用 UTC，没有设置时为 `null`。
 - `reminderEnabled`：是否在截止时刻发送系统通知。
+- `isOverdue`：模型根据完成状态和截止分钟判断是否过期；当前截止分钟内不算过期。`isOverdueAt()` 可在测试中注入固定当前时间。
 
 使用 `Task` 是因为字符串只能保存任务文字，无法同时表达完成状态、截止日期和唯一身份。`Task.toJson()` 和 `Task.fromJson()` 负责对象与 JSON Map 之间的转换。
 
@@ -268,6 +269,8 @@ flutter analyze
 - 日期与时间选择器、精确到分钟的提示和新任务截止时间持久化
 - `DateTime?` 的 ISO8601 序列化、反序列化及旧数据缺字段兼容
 - 旧截止时间迁移到 UTC、新任务提醒默认值和旧任务提醒默认关闭
+- `Task` 分钟级过期规则，以及完成或无截止时间时不过期
+- 公共日期格式统一补零并显示到分钟
 - 提醒资格过滤、按到期时间排序以及 Apple 最近 64 条队列上限
 - 编辑任务名称、截止时间和提醒开关并持久化
 - 通知权限拒绝后回退关闭、系统设置跳转和通知点击任务高亮
@@ -297,12 +300,14 @@ lib/pages/todo_page.dart         TodoPage 页面、交互与界面状态
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
 lib/services/task_notification_service.dart  通知权限、调度对账、64 条队列和点击载荷
+lib/utils/date_format.dart       全局统一的本地日期时间展示格式
 lib/widgets/quote_card.dart      每日一句 FutureBuilder、状态展示与刷新入口
 lib/widgets/task_tile.dart       单条任务的滑动删除、卡片、勾选与编辑入口
 lib/widgets/task_input_bar.dart  底部输入框、日期、提醒、回收站与添加入口
 test/widget_test.dart            Widget、持久化、兼容与重连状态机测试
 test/quote_service_test.dart     名言响应解析、超时和网络异常测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
+test/task_model_test.dart        Task 过期业务规则与公共日期格式测试
 pubspec.yaml                     Flutter 配置与依赖
 android/                         Android 工程及正式网络权限
 ios/                             iOS 工程

@@ -7,6 +7,7 @@ import '../models/task.dart';
 import '../services/quote_service.dart';
 import '../services/task_notification_service.dart';
 import '../services/task_storage.dart';
+import '../utils/date_format.dart';
 import '../widgets/quote_card.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
@@ -367,7 +368,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                         child: Text(
                           editedDueDate == null
                               ? '未设置截止时间'
-                              : '截止时间：${_formatDateTime(editedDueDate!)}',
+                              : '截止时间：${formatDateTime(editedDueDate!)}',
                         ),
                       ),
                       IconButton(
@@ -673,15 +674,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     _quoteRetryTimer?.cancel();
     _quoteRetryCount = 0;
     _startQuoteRequest(stage: QuoteLoadStage.loading, notify: true);
-  }
-
-  String _formatDateTime(DateTime date) {
-    final DateTime localDate = date.toLocal();
-    final String month = localDate.month.toString().padLeft(2, '0');
-    final String day = localDate.day.toString().padLeft(2, '0');
-    final String hour = localDate.hour.toString().padLeft(2, '0');
-    final String minute = localDate.minute.toString().padLeft(2, '0');
-    return '${localDate.year}-$month-$day $hour:$minute';
   }
 
   int get _activeDeletedTaskCount {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../utils/date_format.dart';
+
 /// 底部录入区的纯展示组件；输入值、日期和提醒状态均由页面 State 持有。
 class TaskInputBar extends StatelessWidget {
   const TaskInputBar({
@@ -24,15 +26,6 @@ class TaskInputBar extends StatelessWidget {
   final VoidCallback onPickDueDate;
   final ValueChanged<bool> onReminderChanged;
   final VoidCallback onShowTrash;
-
-  String _formatDateTime(DateTime date) {
-    final DateTime localDate = date.toLocal();
-    final String month = localDate.month.toString().padLeft(2, '0');
-    final String day = localDate.day.toString().padLeft(2, '0');
-    final String hour = localDate.hour.toString().padLeft(2, '0');
-    final String minute = localDate.minute.toString().padLeft(2, '0');
-    return '${localDate.year}-$month-$day $hour:$minute';
-  }
 
   bool get _dueDateIsPast =>
       selectedDueDate != null &&
@@ -121,7 +114,7 @@ class TaskInputBar extends StatelessWidget {
                   child: Text(
                     selectedDueDate == null
                         ? '未设置截止时间'
-                        : _formatDateTime(selectedDueDate!),
+                        : formatDateTime(selectedDueDate!),
                     style: const TextStyle(
                       fontSize: 12,
                       color: Color(0xFF4F6F56),

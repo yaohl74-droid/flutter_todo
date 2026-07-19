@@ -24,6 +24,34 @@ class Task {
   DateTime? dueDate;
   bool reminderEnabled;
 
+  /// 是否已超过截止分钟；当前分钟仍不算过期，已完成任务永远不算过期。
+  bool get isOverdue => isOverdueAt(DateTime.now());
+
+  /// 允许测试传入固定当前时间，避免业务规则测试依赖真实时钟。
+  bool isOverdueAt(DateTime now) {
+    if (isDone || dueDate == null) {
+      return false;
+    }
+
+    final DateTime localDueDate = dueDate!.toLocal();
+    final DateTime localNow = now.toLocal();
+    final DateTime dueMinute = DateTime(
+      localDueDate.year,
+      localDueDate.month,
+      localDueDate.day,
+      localDueDate.hour,
+      localDueDate.minute,
+    );
+    final DateTime currentMinute = DateTime(
+      localNow.year,
+      localNow.month,
+      localNow.day,
+      localNow.hour,
+      localNow.minute,
+    );
+    return dueMinute.isBefore(currentMinute);
+  }
+
   // 把 Task 转成可被 JSON 编码的 Map，便于保存到本地。
   Map<String, dynamic> toJson() => {
     'id': id,

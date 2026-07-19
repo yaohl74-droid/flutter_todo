@@ -22,6 +22,16 @@ void main() {
     expect(find.byType(Checkbox), findsNWidgets(3));
     expect(find.byType(Card), findsNWidgets(3));
     expect(find.byType(Dismissible), findsNWidgets(3));
+    expect(find.text('排序：按截止日期（升序）'), findsOneWidget);
+    expect(find.byType(PopupMenuButton<TaskSortOrder>), findsOneWidget);
+    expect(
+      tester
+          .widget<PopupMenuButton<TaskSortOrder>>(
+            find.byType(PopupMenuButton<TaskSortOrder>),
+          )
+          .initialValue,
+      TaskSortOrder.dueDate,
+    );
 
     final Iterable<Key?> dismissibleKeys = tester
         .widgetList<Dismissible>(find.byType(Dismissible))
@@ -285,6 +295,106 @@ void main() {
     );
     expect(openDate.style?.color, Colors.red);
     expect(doneDate.style?.color, isNot(Colors.red));
+  });
+
+  testWidgets('按截止日期显示且不改变任务原始顺序', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'task_sort_order': 'dueDate',
+      'tasks': jsonEncode([
+        {'id': 'no-date', 'title': '无日期', 'isDone': false},
+        {
+          'id': 'later',
+          'title': '较晚到期',
+          'isDone': false,
+          'dueDate': '2026-08-20T10:00:00.000',
+        },
+        {
+          'id': 'earlier',
+          'title': '较早到期',
+          'isDone': false,
+          'dueDate': '2026-08-10T10:00:00.000',
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('排序：按截止日期（升序）'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('较早到期')).dy,
+      lessThan(tester.getTopLeft(find.text('较晚到期')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('较晚到期')).dy,
+      lessThan(tester.getTopLeft(find.text('无日期')).dy),
+    );
+
+    // 勾选当前显示的第一项会触发保存，JSON 顺序仍应是原始添加顺序。
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pumpAndSettle();
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.map((task) => task['title']), ['无日期', '较晚到期', '较早到期']);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('sort-direction-button')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('排序：按截止日期（降序）'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('较晚到期')).dy,
+      lessThan(tester.getTopLeft(find.text('较早到期')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('较早到期')).dy,
+      lessThan(tester.getTopLeft(find.text('无日期')).dy),
+    );
+    expect(preferences.getBool('task_sort_ascending'), isFalse);
+
+    // 模拟重启页面，已保存的降序偏好应自动恢复。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+    expect(find.text('排序：按截止日期（降序）'), findsOneWidget);
+  });
+
+  testWidgets('切换完成状态排序并持久化偏好', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {'id': 'done', 'title': '已完成任务', 'isDone': true},
+        {'id': 'open', 'title': '未完成任务', 'isDone': false},
+      ]),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(PopupMenuButton<TaskSortOrder>));
+    await tester.pumpAndSettle();
+    expect(find.text('按添加顺序'), findsOneWidget);
+    expect(find.text('按截止日期'), findsOneWidget);
+    expect(find.text('按完成状态'), findsOneWidget);
+
+    final Finder completionMenuItem = find.byWidgetPredicate(
+      (Widget widget) =>
+          widget is CheckedPopupMenuItem<TaskSortOrder> &&
+          widget.value == TaskSortOrder.completion,
+    );
+    await tester.tap(completionMenuItem);
+    await tester.pumpAndSettle();
+
+    expect(find.text('排序：按完成状态（升序）'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('未完成任务')).dy,
+      lessThan(tester.getTopLeft(find.text('已完成任务')).dy),
+    );
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('task_sort_order'), 'completion');
   });
 
   testWidgets('兼容字符串旧存档并跳过缺少标题的记录', (WidgetTester tester) async {

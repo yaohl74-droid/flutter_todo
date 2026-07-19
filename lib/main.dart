@@ -222,7 +222,7 @@ class _TodoPageState extends State<TodoPage> {
     ).showSnackBar(const SnackBar(content: Text('已添加')));
   }
 
-  Future<void> _pickDueDateTime() async {
+  Future<void> _pickDueDate() async {
     final DateTime now = DateTime.now();
     final DateTime today = DateTime(now.year, now.month, now.day);
     final DateTime firstDate = DateTime(today.year - 100);
@@ -242,18 +242,8 @@ class _TodoPageState extends State<TodoPage> {
       lastDate: lastDate,
     );
 
-    // 日期选择器关闭时页面可能已销毁，打开下一个控件前必须检查 mounted。
+    // 日期选择器关闭时页面可能已销毁，更新 State 前必须检查 mounted。
     if (!mounted || pickedDate == null) {
-      return;
-    }
-
-    // Flutter 将日期和时间拆成两个原生控件；第二步选择小时和分钟。
-    final TimeOfDay? pickedTime = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(_selectedDueDate ?? now),
-    );
-
-    if (!mounted || pickedTime == null) {
       return;
     }
 
@@ -262,8 +252,6 @@ class _TodoPageState extends State<TodoPage> {
         pickedDate.year,
         pickedDate.month,
         pickedDate.day,
-        pickedTime.hour,
-        pickedTime.minute,
       );
     });
   }
@@ -335,13 +323,11 @@ class _TodoPageState extends State<TodoPage> {
     super.dispose();
   }
 
-  String _formatDateTime(DateTime date) {
+  String _formatDate(DateTime date) {
     final DateTime localDate = date.toLocal();
     final String month = localDate.month.toString().padLeft(2, '0');
     final String day = localDate.day.toString().padLeft(2, '0');
-    final String hour = localDate.hour.toString().padLeft(2, '0');
-    final String minute = localDate.minute.toString().padLeft(2, '0');
-    return '${localDate.year}-$month-$day $hour:$minute';
+    return '${localDate.year}-$month-$day';
   }
 
   bool _isOverdue(Task task) {
@@ -349,25 +335,17 @@ class _TodoPageState extends State<TodoPage> {
       return false;
     }
 
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
     final DateTime localDueDate = task.dueDate!.toLocal();
-    final DateTime dueMinute = DateTime(
+    final DateTime dueDay = DateTime(
       localDueDate.year,
       localDueDate.month,
       localDueDate.day,
-      localDueDate.hour,
-      localDueDate.minute,
-    );
-    final DateTime now = DateTime.now();
-    final DateTime currentMinute = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      now.hour,
-      now.minute,
     );
 
-    // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
-    return dueMinute.isBefore(currentMinute);
+    // 只比较年月日，今天到期不算过期，早于今天且未完成才标红。
+    return dueDay.isBefore(today);
   }
 
   @override
@@ -460,7 +438,7 @@ class _TodoPageState extends State<TodoPage> {
                             subtitle: task.dueDate == null
                                 ? null
                                 : Text(
-                                    '截止日期：${_formatDateTime(task.dueDate!)}',
+                                    '截止日期：${_formatDate(task.dueDate!)}',
                                     style: TextStyle(
                                       color: _isOverdue(task)
                                           ? Colors.red
@@ -509,19 +487,19 @@ class _TodoPageState extends State<TodoPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // 日历按钮依次选择日期和时间，选中后在输入框旁显示到分钟。
+                  // 日历按钮打开日期选择器，选中后在输入框旁显示日期。
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         key: const ValueKey<String>('due-date-button'),
-                        tooltip: '选择截止日期和时间',
-                        onPressed: _pickDueDateTime,
+                        tooltip: '选择截止日期',
+                        onPressed: _pickDueDate,
                         icon: const Icon(Icons.calendar_month),
                       ),
                       if (_selectedDueDate != null)
                         Text(
-                          _formatDateTime(_selectedDueDate!),
+                          _formatDate(_selectedDueDate!),
                           style: const TextStyle(
                             fontSize: 11,
                             color: Color(0xFF4F6F56),

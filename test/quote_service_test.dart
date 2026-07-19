@@ -37,7 +37,9 @@ void main() {
 
   test('QuoteService 捕获其他网络异常', () async {
     final QuoteService service = QuoteService(
-      client: MockClient((_) => Future<http.Response>.error(StateError('断网'))),
+      client: MockClient(
+        (_) => Future<http.Response>.error(http.ClientException('断网')),
+      ),
     );
 
     await expectLater(

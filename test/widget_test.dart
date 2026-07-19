@@ -13,9 +13,16 @@ class _FakeQuoteService extends QuoteService {
 
   final Future<Quote> Function(int callCount) _fetcher;
   int callCount = 0;
+  bool isDisposed = false;
 
   @override
   Future<Quote> fetchQuote() => _fetcher(++callCount);
+
+  @override
+  void dispose() {
+    isDisposed = true;
+    super.dispose();
+  }
 }
 
 Widget _buildTestApp({_FakeQuoteService? quoteService}) {
@@ -472,13 +479,20 @@ void main() {
     expect(find.text('—— 新作者'), findsOneWidget);
   });
 
-  testWidgets('网络异常显示错误提示并可重试', (WidgetTester tester) async {
+  testWidgets('非超时网络异常也会自动重连三次', (WidgetTester tester) async {
     final _FakeQuoteService service = _FakeQuoteService(
       (_) => Future<Quote>.error(const QuoteException('网络异常')),
     );
 
     await tester.pumpWidget(_buildTestApp(quoteService: service));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    expect(find.text('正在联网获取名言,请稍等'), findsOneWidget);
+
+    for (int retry = 1; retry <= 3; retry++) {
+      await tester.pump(const Duration(seconds: 60));
+      await tester.pump();
+      expect(service.callCount, retry + 1);
+    }
 
     expect(find.text('无法连接,无法显示名言'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
@@ -527,6 +541,7 @@ void main() {
     expect(service.callCount, 3);
 
     await tester.pumpWidget(const SizedBox.shrink());
+    expect(service.isDisposed, isTrue);
     await tester.pump(const Duration(seconds: 60));
     expect(service.callCount, 3);
   });

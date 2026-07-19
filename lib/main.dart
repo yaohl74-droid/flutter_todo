@@ -387,6 +387,7 @@ class _TodoPageState extends State<TodoPage> {
   void dispose() {
     // 页面销毁后必须取消等待中的重连，避免 Timer 回调对已销毁页面 setState。
     _quoteRetryTimer?.cancel();
+    _quoteService.dispose();
     // 页面销毁时释放输入控制器，避免占用不再需要的资源。
     _taskController.dispose();
     super.dispose();
@@ -426,8 +427,8 @@ class _TodoPageState extends State<TodoPage> {
         if (!mounted || requestId != _quoteRequestId) {
           return;
         }
-        if (error is QuoteTimeoutException &&
-            _quoteRetryCount < _maxQuoteRetries) {
+        // 超时、断网、DNS 和 TLS 等请求失败都统一按 QuoteException 重连。
+        if (error is QuoteException && _quoteRetryCount < _maxQuoteRetries) {
           _scheduleQuoteRetry();
           return;
         }

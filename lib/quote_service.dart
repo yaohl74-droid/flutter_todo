@@ -33,6 +33,11 @@ class QuoteService {
   final http.Client _client;
   final Duration _requestTimeout;
 
+  void dispose() {
+    // QuoteService 与页面生命周期一致，页面销毁时释放底层 HTTP 连接。
+    _client.close();
+  }
+
   Future<Quote> fetchQuote() async {
     try {
       final http.Response response = await _client
@@ -56,11 +61,13 @@ class QuoteService {
 
       return Quote(content: content, author: '佚名');
     } on TimeoutException {
-      // 把底层超时转换成明确类型，页面据此启动定时重连。
+      // 保留明确的超时类型；页面会对所有 QuoteException 统一启动定时重连。
       throw const QuoteTimeoutException();
+    } on FormatException {
+      throw const QuoteException('名言数据格式错误');
     } on QuoteException {
       rethrow;
-    } on Object {
+    } on Exception {
       // DNS、断网、TLS 等网络异常统一转换，避免异常逃逸导致 App 崩溃。
       throw const QuoteException('网络异常，暂时无法获取名言');
     }

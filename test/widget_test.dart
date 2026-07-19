@@ -194,7 +194,97 @@ void main() {
     final Task task = Task.fromJson({'title': '旧任务', 'isDone': false});
 
     expect(task.id, isNotEmpty);
+    expect(task.dueDate, isNull);
     expect(task.toJson()['id'], task.id);
+  });
+
+  test('截止日期使用 ISO8601 字符串序列化并能还原', () {
+    final DateTime dueDate = DateTime(2026, 7, 31);
+    final Task task = Task(title: '有截止日期', dueDate: dueDate);
+
+    final Map<String, dynamic> json = task.toJson();
+    final Task restoredTask = Task.fromJson(json);
+
+    expect(json['dueDate'], dueDate.toIso8601String());
+    expect(restoredTask.dueDate, dueDate);
+  });
+
+  testWidgets('选择截止日期和时间后显示并随新任务保存', (WidgetTester tester) async {
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('due-date-button')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TimePickerDialog), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+
+    final Finder selectedDateTime = find.textContaining(
+      RegExp(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$'),
+    );
+    expect(selectedDateTime, findsOneWidget);
+    final String displayedDateTime = tester
+        .widget<Text>(selectedDateTime)
+        .data!;
+
+    await tester.enterText(find.byType(TextField), '今天到期');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+
+    expect(find.text('截止日期：$displayedDateTime'), findsOneWidget);
+    expect(find.text(displayedDateTime), findsNothing);
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    final DateTime savedDueDate = DateTime.parse(
+      savedTasks.last['dueDate'] as String,
+    );
+    expect(savedDueDate.second, 0);
+    expect(savedDueDate.millisecond, 0);
+  });
+
+  testWidgets('已过期且未完成的日期显示红色', (WidgetTester tester) async {
+    final DateTime now = DateTime.now();
+    final DateTime yesterday = DateTime(now.year, now.month, now.day - 1);
+    final DateTime twoDaysAgo = DateTime(now.year, now.month, now.day - 2);
+    String formatDateTime(DateTime date) =>
+        '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} '
+        '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'overdue-open',
+          'title': '未完成过期任务',
+          'isDone': false,
+          'dueDate': yesterday.toIso8601String(),
+        },
+        {
+          'id': 'overdue-done',
+          'title': '已完成过期任务',
+          'isDone': true,
+          'dueDate': twoDaysAgo.toIso8601String(),
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pumpAndSettle();
+
+    final Text openDate = tester.widget<Text>(
+      find.text('截止日期：${formatDateTime(yesterday)}'),
+    );
+    final Text doneDate = tester.widget<Text>(
+      find.text('截止日期：${formatDateTime(twoDaysAgo)}'),
+    );
+    expect(openDate.style?.color, Colors.red);
+    expect(doneDate.style?.color, isNot(Colors.red));
   });
 
   testWidgets('兼容字符串旧存档并跳过缺少标题的记录', (WidgetTester tester) async {

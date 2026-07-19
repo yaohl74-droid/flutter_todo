@@ -33,7 +33,7 @@ class MyApp extends StatelessWidget {
 // String 只能保存任务文字，无法同时记录任务是否完成。
 // 改用 Task 后，每一项任务就能把文字和完成状态放在同一个数据结构中管理。
 class Task {
-  Task({String? id, required this.title, this.isDone = false})
+  Task({String? id, required this.title, this.isDone = false, this.dueDate})
     : id = id ?? _generateId();
 
   static int _idSequence = 0;
@@ -46,9 +46,17 @@ class Task {
   final String id;
   final String title;
   bool isDone;
+  final DateTime? dueDate;
 
   // 把 Task 转成可被 JSON 编码的 Map，便于保存到本地。
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'isDone': isDone};
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'isDone': isDone,
+    // JSON 没有原生 DateTime 类型，因此用 ISO8601 字符串保存；
+    // 这种标准格式跨平台一致，也能用 DateTime.tryParse 安全还原。
+    'dueDate': dueDate?.toIso8601String(),
+  };
 
   // 从 JSON Map 还原 Task，让保存的数据能重新变成应用中的对象。
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -60,6 +68,8 @@ class Task {
       // 不再强制把 null 转成 String，避免损坏或旧数据导致启动崩溃。
       title: json['title']?.toString() ?? '',
       isDone: json['isDone'] == true,
+      // 老数据没有 dueDate 时得到 null；无效日期字符串也安全降级为 null。
+      dueDate: DateTime.tryParse(json['dueDate']?.toString() ?? ''),
     );
   }
 }
@@ -82,6 +92,7 @@ class _TodoPageState extends State<TodoPage> {
     Task(title: '跑步'),
   ];
   final TextEditingController _taskController = TextEditingController();
+  DateTime? _selectedDueDate;
 
   @override
   void initState() {
@@ -144,7 +155,11 @@ class _TodoPageState extends State<TodoPage> {
 
       // 若旧数据中意外存在重复 ID，重新创建任务以获得新的唯一 ID。
       if (!usedIds.add(task.id)) {
-        task = Task(title: task.title, isDone: task.isDone);
+        task = Task(
+          title: task.title,
+          isDone: task.isDone,
+          dueDate: task.dueDate,
+        );
         usedIds.add(task.id);
         needsMigration = true;
       }
@@ -190,7 +205,9 @@ class _TodoPageState extends State<TodoPage> {
     // setState 告诉 Flutter 状态已经改变，需要重新执行 build 方法，
     // 这样新加入 _tasks 的任务才会显示在界面上。
     setState(() {
-      _tasks.add(Task(title: task));
+      _tasks.add(Task(title: task, dueDate: _selectedDueDate));
+      // 截止日期只属于本次新任务，添加后清空，避免带到下一条任务。
+      _selectedDueDate = null;
     });
     _taskController.clear();
     await _saveTasks();
@@ -203,6 +220,52 @@ class _TodoPageState extends State<TodoPage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('已添加')));
+  }
+
+  Future<void> _pickDueDateTime() async {
+    final DateTime now = DateTime.now();
+    final DateTime today = DateTime(now.year, now.month, now.day);
+    final DateTime firstDate = DateTime(today.year - 100);
+    final DateTime lastDate = DateTime(today.year + 100, 12, 31);
+    final DateTime selectedDate = _selectedDueDate ?? today;
+    final DateTime initialDate = selectedDate.isBefore(firstDate)
+        ? firstDate
+        : selectedDate.isAfter(lastDate)
+        ? lastDate
+        : selectedDate;
+
+    // showDatePicker 异步等待用户选择或取消，因此用 await 获取最终结果。
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+    );
+
+    // 日期选择器关闭时页面可能已销毁，打开下一个控件前必须检查 mounted。
+    if (!mounted || pickedDate == null) {
+      return;
+    }
+
+    // Flutter 将日期和时间拆成两个原生控件；第二步选择小时和分钟。
+    final TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_selectedDueDate ?? now),
+    );
+
+    if (!mounted || pickedTime == null) {
+      return;
+    }
+
+    setState(() {
+      _selectedDueDate = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+    });
   }
 
   Future<void> _toggleTask(Task task, bool? isDone) async {
@@ -270,6 +333,41 @@ class _TodoPageState extends State<TodoPage> {
     // 页面销毁时释放输入控制器，避免占用不再需要的资源。
     _taskController.dispose();
     super.dispose();
+  }
+
+  String _formatDateTime(DateTime date) {
+    final DateTime localDate = date.toLocal();
+    final String month = localDate.month.toString().padLeft(2, '0');
+    final String day = localDate.day.toString().padLeft(2, '0');
+    final String hour = localDate.hour.toString().padLeft(2, '0');
+    final String minute = localDate.minute.toString().padLeft(2, '0');
+    return '${localDate.year}-$month-$day $hour:$minute';
+  }
+
+  bool _isOverdue(Task task) {
+    if (task.isDone || task.dueDate == null) {
+      return false;
+    }
+
+    final DateTime localDueDate = task.dueDate!.toLocal();
+    final DateTime dueMinute = DateTime(
+      localDueDate.year,
+      localDueDate.month,
+      localDueDate.day,
+      localDueDate.hour,
+      localDueDate.minute,
+    );
+    final DateTime now = DateTime.now();
+    final DateTime currentMinute = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
+    );
+
+    // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
+    return dueMinute.isBefore(currentMinute);
   }
 
   @override
@@ -359,6 +457,16 @@ class _TodoPageState extends State<TodoPage> {
                                 color: task.isDone ? Colors.grey : null,
                               ),
                             ),
+                            subtitle: task.dueDate == null
+                                ? null
+                                : Text(
+                                    '截止日期：${_formatDateTime(task.dueDate!)}',
+                                    style: TextStyle(
+                                      color: _isOverdue(task)
+                                          ? Colors.red
+                                          : Colors.grey.shade600,
+                                    ),
+                                  ),
                             trailing: IconButton(
                               tooltip: '删除任务',
                               onPressed: () => _deleteTask(task),
@@ -400,7 +508,28 @@ class _TodoPageState extends State<TodoPage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
+                  // 日历按钮依次选择日期和时间，选中后在输入框旁显示到分钟。
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: const ValueKey<String>('due-date-button'),
+                        tooltip: '选择截止日期和时间',
+                        onPressed: _pickDueDateTime,
+                        icon: const Icon(Icons.calendar_month),
+                      ),
+                      if (_selectedDueDate != null)
+                        Text(
+                          _formatDateTime(_selectedDueDate!),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF4F6F56),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 8),
                   ElevatedButton(onPressed: _addTask, child: const Text('添加')),
                 ],
               ),

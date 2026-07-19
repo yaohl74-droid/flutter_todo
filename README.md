@@ -74,9 +74,11 @@ JSON 没有原生 `DateTime` 类型，因此截止日期和时间使用标准 IS
 - 存储值：整个任务数组编码后的 JSON 字符串
 - 排序偏好键：`task_sort_order`，值为 `added`、`dueDate` 或 `completion`
 - 升降序偏好键：`task_sort_ascending`，`true` 为升序，`false` 为降序
-- 启动读取：`TodoPage.initState()` 调用异步 `_loadTasks()`
-- 自动写入：添加、切换完成状态、删除和撤销后调用 `_saveTasks()`
+- 启动读取：`TodoPage.initState()` 通过 `TaskStorage.load()` 异步读取
+- 自动写入：添加、切换完成状态、删除、撤销和排序偏好变化后调用 `TaskStorage.save()`
 - 首次运行：没有 `tasks` 存档时，把三条示例任务立即写入本地
+
+`TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入；页面 State 只消费 `load()` 返回的快照，并通过 `save()` 保存任务或排序偏好，不直接依赖存储实现。
 
 排序只影响显示：代码在 `build` 使用 `List<Task>.of(_tasks)` 创建副本后排序，从不直接修改 `_tasks`。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，撤销时可以恢复到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
@@ -229,17 +231,20 @@ flutter analyze
 ## 项目结构
 
 ```text
-lib/main.dart                 App 入口、Task 模型、页面、交互及状态管理
-lib/quote_service.dart        名言模型、HTTP 请求、超时和异常转换
-test/widget_test.dart         Widget、持久化、兼容与重连状态机测试
-test/quote_service_test.dart  名言响应解析、超时和网络异常测试
-pubspec.yaml                  Flutter 配置与依赖
-android/                      Android 工程及正式网络权限
-ios/                          iOS 工程
-web/                          Web 工程
-macos/                        macOS 工程及沙箱网络权限
-windows/                      Windows 工程
-linux/                        Linux 工程
+lib/main.dart                    App 入口与 MyApp 根组件
+lib/models/task.dart             Task 数据模型与 JSON 转换
+lib/pages/todo_page.dart         TodoPage 页面、交互与界面状态
+lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
+lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
+test/widget_test.dart            Widget、持久化、兼容与重连状态机测试
+test/quote_service_test.dart     名言响应解析、超时和网络异常测试
+pubspec.yaml                     Flutter 配置与依赖
+android/                         Android 工程及正式网络权限
+ios/                             iOS 工程
+web/                             Web 工程
+macos/                           macOS 工程及沙箱网络权限
+windows/                         Windows 工程
+linux/                           Linux 工程
 ```
 
-当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后异步写入本地存储。
+当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后通过 `TaskStorage` 异步写入本地存储。

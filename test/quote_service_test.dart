@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:my_todo/quote_service.dart';
+import 'package:my_todo/services/quote_service.dart';
 
 void main() {
   test('QuoteService 解析 UAPI 名言并使用佚名作为作者', () async {

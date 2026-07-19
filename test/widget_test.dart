@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:my_todo/main.dart';
-import 'package:my_todo/quote_service.dart';
+import 'package:my_todo/models/task.dart';
+import 'package:my_todo/pages/todo_page.dart';
+import 'package:my_todo/services/quote_service.dart';
 
 class _FakeQuoteService extends QuoteService {
   _FakeQuoteService(this._fetcher);

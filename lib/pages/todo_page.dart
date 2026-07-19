@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../models/deleted_task.dart';
 import '../models/task.dart';
 import '../services/quote_service.dart';
 import '../services/task_storage.dart';
@@ -30,6 +31,7 @@ class _TodoPageState extends State<TodoPage> {
     Task(title: '写代码'),
     Task(title: '跑步'),
   ];
+  final List<DeletedTask> _deletedTasks = [];
   final TextEditingController _taskController = TextEditingController();
   final TaskStorage _taskStorage = TaskStorage();
   DateTime? _selectedDueDate;
@@ -74,6 +76,9 @@ class _TodoPageState extends State<TodoPage> {
           ..clear()
           ..addAll(snapshot.tasks!);
       }
+      _deletedTasks
+        ..clear()
+        ..addAll(snapshot.deletedTasks);
     });
   }
 
@@ -179,50 +184,111 @@ class _TodoPageState extends State<TodoPage> {
       return;
     }
 
+    final DeletedTask deletedTask = DeletedTask(
+      task: task,
+      deletedAt: DateTime.now(),
+      originalIndex: originalIndex,
+    );
     setState(() {
       _tasks.removeAt(originalIndex);
+      _deletedTasks.add(deletedTask);
     });
 
-    // 保存可以异步进行，但删除反馈应立即出现，不必等磁盘写入结束。
-    final Future<void> saveOperation = _taskStorage.save(tasks: _tasks);
-
-    if (!mounted) {
-      await saveOperation;
-      return;
-    }
-
-    // 左滑和删除按钮共用提示；SnackBarAction 提供一次撤销机会。
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('已删除 ${task.title}'),
-          action: SnackBarAction(
-            label: '撤销',
-            onPressed: () => _restoreTask(task, originalIndex),
-          ),
-        ),
-      );
-
-    await saveOperation;
+    // 删除后直接进入回收站，不再显示会遮挡底部输入框的撤销 SnackBar。
+    await _taskStorage.save(tasks: _tasks, deletedTasks: _deletedTasks);
   }
 
-  Future<void> _restoreTask(Task task, int originalIndex) async {
-    // SnackBar 的回调触发时页面可能已经销毁，必须先检查 mounted，
-    // 避免对已销毁的 State 调用 setState。
+  Future<void> _restoreDeletedTask(DeletedTask deletedTask) async {
     if (!mounted) {
       return;
     }
 
-    // 若撤销前列表又发生变化，确保插入位置仍在当前列表的有效范围内。
-    final int restoredIndex = originalIndex > _tasks.length
+    // 若恢复前列表又发生变化，确保插入位置仍在当前列表的有效范围内。
+    final int restoredIndex = deletedTask.originalIndex > _tasks.length
         ? _tasks.length
-        : originalIndex;
+        : deletedTask.originalIndex;
 
     setState(() {
-      _tasks.insert(restoredIndex, task);
+      _deletedTasks.remove(deletedTask);
+      _tasks.insert(restoredIndex, deletedTask.task);
     });
-    await _taskStorage.save(tasks: _tasks);
+    await _taskStorage.save(tasks: _tasks, deletedTasks: _deletedTasks);
+  }
+
+  Future<void> _purgeExpiredDeletedTasks() async {
+    final DateTime cutoff = DateTime.now().subtract(TaskStorage.trashRetention);
+    final int previousLength = _deletedTasks.length;
+    setState(() {
+      _deletedTasks.removeWhere((item) => !item.deletedAt.isAfter(cutoff));
+    });
+    if (_deletedTasks.length != previousLength) {
+      await _taskStorage.save(deletedTasks: _deletedTasks);
+    }
+  }
+
+  Future<void> _showTrash() async {
+    await _purgeExpiredDeletedTasks();
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: SizedBox(
+                height: 360,
+                child: Column(
+                  children: [
+                    const Text(
+                      '回收站（保留 7 天）',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: _deletedTasks.isEmpty
+                          ? const Center(child: Text('回收站是空的'))
+                          : ListView.separated(
+                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                              itemCount: _deletedTasks.length,
+                              separatorBuilder: (context, index) =>
+                                  const Divider(),
+                              itemBuilder: (context, index) {
+                                final DeletedTask deletedTask =
+                                    _deletedTasks[index];
+                                return ListTile(
+                                  title: Text(deletedTask.task.title),
+                                  trailing: TextButton.icon(
+                                    key: ValueKey<String>(
+                                      'restore-${deletedTask.task.id}',
+                                    ),
+                                    onPressed: () async {
+                                      await _restoreDeletedTask(deletedTask);
+                                      if (sheetContext.mounted) {
+                                        setSheetState(() {});
+                                      }
+                                    },
+                                    icon: const Icon(Icons.restore),
+                                    label: const Text('恢复'),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -403,6 +469,11 @@ class _TodoPageState extends State<TodoPage> {
 
     // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
     return dueMinute.isBefore(currentMinute);
+  }
+
+  int get _activeDeletedTaskCount {
+    final DateTime cutoff = DateTime.now().subtract(TaskStorage.trashRetention);
+    return _deletedTasks.where((item) => item.deletedAt.isAfter(cutoff)).length;
   }
 
   String get _sortOrderLabel {
@@ -609,6 +680,40 @@ class _TodoPageState extends State<TodoPage> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton(
+                        key: const ValueKey<String>('trash-button'),
+                        tooltip: '回收站',
+                        onPressed: _showTrash,
+                        icon: const Icon(Icons.delete_sweep_outlined),
+                      ),
+                      if (_activeDeletedTaskCount > 0)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade400,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '$_activeDeletedTaskCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 4),
                   Expanded(
                     child: TextField(
                       controller: _taskController,

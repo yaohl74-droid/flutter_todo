@@ -2,17 +2,20 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/deleted_task.dart';
 import '../models/task.dart';
 
 class TaskStorageSnapshot {
   const TaskStorageSnapshot({
     required this.tasks,
+    required this.deletedTasks,
     required this.sortOrder,
     required this.sortAscending,
   });
 
   // null 表示存档缺失或损坏，页面继续保留内存中的示例任务。
   final List<Task>? tasks;
+  final List<DeletedTask> deletedTasks;
   final String? sortOrder;
   final bool sortAscending;
 }
@@ -21,6 +24,8 @@ class TaskStorage {
   static const String _tasksStorageKey = 'tasks';
   static const String _sortOrderStorageKey = 'task_sort_order';
   static const String _sortAscendingStorageKey = 'task_sort_ascending';
+  static const String _deletedTasksStorageKey = 'deleted_tasks';
+  static const Duration trashRetention = Duration(days: 7);
 
   Future<TaskStorageSnapshot> load({required List<Task> fallbackTasks}) async {
     final SharedPreferences preferences = await SharedPreferences.getInstance();
@@ -28,12 +33,14 @@ class TaskStorage {
     final bool sortAscending =
         preferences.getBool(_sortAscendingStorageKey) ?? true;
     final String? tasksJson = preferences.getString(_tasksStorageKey);
+    final List<DeletedTask> deletedTasks = await _loadDeletedTasks(preferences);
 
     // 没有存档说明是首次启动：保留示例任务，并立刻保存到用户设备。
     if (tasksJson == null) {
       await _saveTasks(preferences, fallbackTasks);
       return TaskStorageSnapshot(
         tasks: null,
+        deletedTasks: deletedTasks,
         sortOrder: sortOrder,
         sortAscending: sortAscending,
       );
@@ -46,6 +53,7 @@ class TaskStorage {
     } on FormatException {
       return TaskStorageSnapshot(
         tasks: null,
+        deletedTasks: deletedTasks,
         sortOrder: sortOrder,
         sortAscending: sortAscending,
       );
@@ -54,6 +62,7 @@ class TaskStorage {
     if (decodedJson is! List) {
       return TaskStorageSnapshot(
         tasks: null,
+        deletedTasks: deletedTasks,
         sortOrder: sortOrder,
         sortAscending: sortAscending,
       );
@@ -107,6 +116,7 @@ class TaskStorage {
 
     return TaskStorageSnapshot(
       tasks: savedTasks,
+      deletedTasks: deletedTasks,
       sortOrder: sortOrder,
       sortAscending: sortAscending,
     );
@@ -114,6 +124,7 @@ class TaskStorage {
 
   Future<void> save({
     List<Task>? tasks,
+    List<DeletedTask>? deletedTasks,
     String? sortOrder,
     bool? sortAscending,
   }) async {
@@ -121,6 +132,9 @@ class TaskStorage {
 
     if (tasks != null) {
       await _saveTasks(preferences, tasks);
+    }
+    if (deletedTasks != null) {
+      await _saveDeletedTasks(preferences, deletedTasks);
     }
     if (sortOrder != null) {
       await preferences.setString(_sortOrderStorageKey, sortOrder);
@@ -138,5 +152,61 @@ class TaskStorage {
       tasks.map((task) => task.toJson()).toList(),
     );
     await preferences.setString(_tasksStorageKey, tasksJson);
+  }
+
+  Future<List<DeletedTask>> _loadDeletedTasks(
+    SharedPreferences preferences,
+  ) async {
+    final String? deletedTasksJson = preferences.getString(
+      _deletedTasksStorageKey,
+    );
+    if (deletedTasksJson == null) {
+      return [];
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(deletedTasksJson);
+    } on FormatException {
+      await _saveDeletedTasks(preferences, []);
+      return [];
+    }
+    if (decoded is! List) {
+      await _saveDeletedTasks(preferences, []);
+      return [];
+    }
+
+    final DateTime cutoff = DateTime.now().subtract(trashRetention);
+    final List<DeletedTask> retainedTasks = [];
+    bool needsCleanup = false;
+    for (final dynamic item in decoded) {
+      if (item is! Map) {
+        needsCleanup = true;
+        continue;
+      }
+      final DeletedTask? deletedTask = DeletedTask.fromJson(
+        Map<String, dynamic>.from(item),
+      );
+      if (deletedTask == null || !deletedTask.deletedAt.isAfter(cutoff)) {
+        needsCleanup = true;
+        continue;
+      }
+      retainedTasks.add(deletedTask);
+    }
+
+    if (needsCleanup) {
+      await _saveDeletedTasks(preferences, retainedTasks);
+    }
+    return retainedTasks;
+  }
+
+  Future<void> _saveDeletedTasks(
+    SharedPreferences preferences,
+    List<DeletedTask> deletedTasks,
+  ) async {
+    final String deletedTasksJson = jsonEncode(
+      deletedTasks.map((item) => item.toJson()).toList(),
+    );
+    await preferences.setString(_deletedTasksStorageKey, deletedTasksJson);
   }
 }

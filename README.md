@@ -1,6 +1,6 @@
 # 我的待办
 
-一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加任务、设置截止日期、标记完成、删除与撤销，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
+一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加任务、设置截止日期、标记完成、删除与回收站恢复，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
 
 ## 功能
 
@@ -27,9 +27,10 @@
 - 支持两种删除方式：
   - 向左滑动任务卡片；滑动背景显示红色和白色垃圾桶图标。
   - 点击任务右侧原有的删除按钮。
-- 删除后显示“已删除 xxx”，点击“撤销”可将任务恢复到删除前的位置。
+- 删除后不再显示遮挡输入框的撤销条，任务会进入底部左侧的回收站。
+- 回收站任务保留 7 天，可恢复到删除前的位置；过期任务会自动清理。
 - 当任务列表为空时，页面中央显示大图标和“还没有任务,添加一条吧”。
-- 添加、勾选、删除和撤销操作都会自动保存。
+- 添加、勾选、删除和从回收站恢复操作都会自动保存。
 - 使用柔和绿色主题；输入框获得焦点时显示绿色高亮边框。
 - 任务使用带圆角和轻微阴影的 Card 展示，卡片之间保留间距。
 
@@ -66,21 +67,32 @@ JSON 没有原生 `DateTime` 类型，因此截止日期和时间使用标准 IS
 
 每个任务卡片由 `Dismissible` 包裹，并使用 `ValueKey(task.id)`。这个 key 必须唯一，否则 Flutter 在列表更新和滑动动画期间可能复用、移动或删除错误的任务组件。
 
+回收站使用 `DeletedTask` 保存完整任务、删除时间和原始索引：
+
+```dart
+class DeletedTask {
+  final Task task;
+  final DateTime deletedAt;
+  final int originalIndex;
+}
+```
+
 ## 本地持久化
 
 项目使用 [`shared_preferences`](https://pub.dev/packages/shared_preferences) 保存数据：
 
 - 存储键：`tasks`
 - 存储值：整个任务数组编码后的 JSON 字符串
+- 回收站键：`deleted_tasks`，保存任务、删除时间和原始索引，超过 7 天自动清理
 - 排序偏好键：`task_sort_order`，值为 `added`、`dueDate` 或 `completion`
 - 升降序偏好键：`task_sort_ascending`，`true` 为升序，`false` 为降序
 - 启动读取：`TodoPage.initState()` 通过 `TaskStorage.load()` 异步读取
-- 自动写入：添加、切换完成状态、删除、撤销和排序偏好变化后调用 `TaskStorage.save()`
+- 自动写入：添加、切换完成状态、删除、回收站恢复和排序偏好变化后调用 `TaskStorage.save()`
 - 首次运行：没有 `tasks` 存档时，把三条示例任务立即写入本地
 
 `TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入；页面 State 只消费 `load()` 返回的快照，并通过 `save()` 保存任务或排序偏好，不直接依赖存储实现。
 
-排序只影响显示：代码在 `build` 使用 `List<Task>.of(_tasks)` 创建副本后排序，从不直接修改 `_tasks`。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，撤销时可以恢复到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
+排序只影响显示：代码在 `build` 使用 `List<Task>.of(_tasks)` 创建副本后排序，从不直接修改 `_tasks`。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
 ## 每日一句
 
@@ -94,7 +106,7 @@ JSON 没有原生 `DateTime` 类型，因此截止日期和时间使用标准 IS
 
 `initState` 是 `State` 创建后只执行一次的初始化方法，因此适合启动读取。它本身不能声明为 `async`，所以实际异步工作放在单独方法中，并使用 `async/await` 等待读写完成。
 
-异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。撤销回调也在恢复任务前执行该检查。
+异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。回收站恢复操作也会先执行该检查。
 
 ### 旧数据兼容与迁移
 
@@ -219,7 +231,8 @@ flutter analyze
 - 从本地存档恢复任务
 - 空列表引导界面
 - 添加、勾选和删除后的自动持久化
-- 左滑删除、删除提示、撤销及恢复原位置
+- 左滑或按钮删除后进入回收站，不再显示遮挡输入框的撤销条
+- 回收站持久化、七天过期清理及恢复原位置
 - `Dismissible` key 唯一性
 - 旧 JSON 缺少 ID 时自动补全
 - 旧字符串数组迁移和损坏记录容错
@@ -233,6 +246,7 @@ flutter analyze
 ```text
 lib/main.dart                    App 入口与 MyApp 根组件
 lib/models/task.dart             Task 数据模型与 JSON 转换
+lib/models/deleted_task.dart     回收站任务、删除时间与原始索引
 lib/pages/todo_page.dart         TodoPage 页面、交互与界面状态
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换

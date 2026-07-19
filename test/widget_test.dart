@@ -199,29 +199,28 @@ void main() {
     preferences = await SharedPreferences.getInstance();
     savedTasks = jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(savedTasks.where((task) => task['title'] == '持久化任务'), isEmpty);
+    final List<dynamic> deletedTasks =
+        jsonDecode(preferences.getString('deleted_tasks')!) as List<dynamic>;
+    expect(deletedTasks.single['task']['title'], '持久化任务');
   });
 
-  testWidgets('左滑删除后可撤销并恢复原位置', (WidgetTester tester) async {
+  testWidgets('左滑删除进入回收站并可恢复原位置', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.drag(find.byType(Dismissible).first, const Offset(-500, 0));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump();
-    // 等待异步保存结束，以及 SnackBar 的入场动画完成。
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
 
     expect(find.text('买菜'), findsNothing);
-    expect(find.text('已删除 买菜'), findsOneWidget);
-    expect(find.text('撤销'), findsOneWidget);
+    expect(find.text('撤销'), findsNothing);
 
-    await tester.tap(find.text('撤销'));
-    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey<String>('trash-button')));
+    await tester.pumpAndSettle();
+    expect(find.text('回收站（保留 7 天）'), findsOneWidget);
+    expect(find.text('买菜'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, '恢复'));
+    await tester.pumpAndSettle();
 
     expect(find.text('买菜'), findsOneWidget);
     expect(
@@ -233,6 +232,41 @@ void main() {
     final List<dynamic> savedTasks =
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(savedTasks.first['title'], '买菜');
+    final List<dynamic> deletedTasks =
+        jsonDecode(preferences.getString('deleted_tasks')!) as List<dynamic>;
+    expect(deletedTasks, isEmpty);
+  });
+
+  testWidgets('回收站自动清理超过七天的任务', (WidgetTester tester) async {
+    final DateTime now = DateTime.now();
+    SharedPreferences.setMockInitialValues({
+      'tasks': '[]',
+      'deleted_tasks': jsonEncode([
+        {
+          'task': {'id': 'expired', 'title': '八天前删除', 'isDone': false},
+          'deletedAt': now.subtract(const Duration(days: 8)).toIso8601String(),
+          'originalIndex': 0,
+        },
+        {
+          'task': {'id': 'recent', 'title': '一天前删除', 'isDone': false},
+          'deletedAt': now.subtract(const Duration(days: 1)).toIso8601String(),
+          'originalIndex': 0,
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('trash-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('八天前删除'), findsNothing);
+    expect(find.text('一天前删除'), findsOneWidget);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> deletedTasks =
+        jsonDecode(preferences.getString('deleted_tasks')!) as List<dynamic>;
+    expect(deletedTasks, hasLength(1));
+    expect(deletedTasks.single['task']['title'], '一天前删除');
   });
 
   test('旧版 JSON 没有 id 时自动补全并可再次序列化', () {

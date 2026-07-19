@@ -416,22 +416,24 @@ class _TodoPageState extends State<TodoPage> {
 
   List<Task> get _displayedTasks {
     final List<Task> displayedTasks = List<Task>.of(_tasks);
-    final Map<Task, int> originalIndexes = {
-      for (int index = 0; index < _tasks.length; index++) _tasks[index]: index,
+    final Map<String, int> originalIndexes = {
+      for (int index = 0; index < _tasks.length; index++)
+        _tasks[index].id: index,
     };
 
     displayedTasks.sort((first, second) {
       int comparison;
       switch (_sortOrder) {
         case TaskSortOrder.added:
-          comparison = originalIndexes[first]!.compareTo(
-            originalIndexes[second]!,
+          comparison = originalIndexes[first.id]!.compareTo(
+            originalIndexes[second.id]!,
           );
           break;
         case TaskSortOrder.dueDate:
           if (first.dueDate == null && second.dueDate == null) {
             comparison = 0;
           } else if (first.dueDate == null) {
+            // 这里直接返回并跳过下方的升降序翻转，保证无日期任务始终排在最后。
             return 1;
           } else if (second.dueDate == null) {
             return -1;
@@ -447,7 +449,7 @@ class _TodoPageState extends State<TodoPage> {
       if (comparison != 0) {
         return _sortAscending ? comparison : -comparison;
       }
-      return originalIndexes[first]!.compareTo(originalIndexes[second]!);
+      return originalIndexes[first.id]!.compareTo(originalIndexes[second.id]!);
     });
     return displayedTasks;
   }

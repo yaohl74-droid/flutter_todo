@@ -9,6 +9,7 @@ import 'package:my_todo/main.dart';
 import 'package:my_todo/models/task.dart';
 import 'package:my_todo/pages/todo_page.dart';
 import 'package:my_todo/services/quote_service.dart';
+import 'package:my_todo/services/task_notification_service.dart';
 
 class _FakeQuoteService extends QuoteService {
   _FakeQuoteService(this._fetcher);
@@ -27,13 +28,58 @@ class _FakeQuoteService extends QuoteService {
   }
 }
 
-Widget _buildTestApp({_FakeQuoteService? quoteService}) {
+class _FakeNotificationScheduler implements TaskNotificationScheduler {
+  _FakeNotificationScheduler({
+    this.isAvailable = false,
+    this.permission = true,
+  });
+
+  @override
+  final bool isAvailable;
+  bool permission;
+  int permissionRequestCount = 0;
+  int settingsOpenCount = 0;
+  final List<List<Task>> reconciliations = <List<Task>>[];
+  TaskNotificationTapCallback? onTaskSelected;
+  String? initialTaskId;
+
+  @override
+  Future<String?> initialize({
+    required TaskNotificationTapCallback onTaskSelected,
+  }) async {
+    this.onTaskSelected = onTaskSelected;
+    return initialTaskId;
+  }
+
+  @override
+  Future<void> openNotificationSettings() async {
+    settingsOpenCount++;
+  }
+
+  @override
+  Future<void> reconcile(List<Task> tasks) async {
+    reconciliations.add(List<Task>.of(tasks));
+  }
+
+  @override
+  Future<bool> requestPermissions() async {
+    permissionRequestCount++;
+    return permission;
+  }
+}
+
+Widget _buildTestApp({
+  _FakeQuoteService? quoteService,
+  _FakeNotificationScheduler? notificationScheduler,
+}) {
   return MyApp(
     quoteService:
         quoteService ??
         _FakeQuoteService(
           (_) async => const Quote(content: '测试名言', author: '测试作者'),
         ),
+    notificationScheduler:
+        notificationScheduler ?? _FakeNotificationScheduler(),
   );
 }
 
@@ -277,15 +323,162 @@ void main() {
     expect(task.toJson()['id'], task.id);
   });
 
-  test('截止日期使用 ISO8601 字符串序列化并能还原', () {
+  test('截止日期使用 UTC ISO8601 字符串序列化并能还原', () {
     final DateTime dueDate = DateTime(2026, 7, 31);
     final Task task = Task(title: '有截止日期', dueDate: dueDate);
 
     final Map<String, dynamic> json = task.toJson();
     final Task restoredTask = Task.fromJson(json);
 
-    expect(json['dueDate'], dueDate.toIso8601String());
-    expect(restoredTask.dueDate, dueDate);
+    expect(json['dueDateUtc'], dueDate.toUtc().toIso8601String());
+    expect(restoredTask.dueDate, dueDate.toUtc());
+    expect(restoredTask.dueDate!.isUtc, isTrue);
+    expect(restoredTask.reminderEnabled, isFalse);
+  });
+
+  testWidgets('旧截止时间迁移为 UTC 且旧任务默认关闭提醒', (WidgetTester tester) async {
+    final DateTime legacyDueDate = DateTime(2026, 8, 20, 9, 30);
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'legacy-time',
+          'title': '旧日期任务',
+          'isDone': false,
+          'dueDate': legacyDueDate.toIso8601String(),
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    final Map<String, dynamic> savedTask = Map<String, dynamic>.from(
+      savedTasks.single as Map,
+    );
+    expect(savedTask.containsKey('dueDate'), isFalse);
+    expect(DateTime.parse(savedTask['dueDateUtc'] as String).isUtc, isTrue);
+    expect(savedTask['reminderEnabled'], isFalse);
+  });
+
+  testWidgets('编辑任务可开启提醒并保存名称', (WidgetTester tester) async {
+    final DateTime futureDueDate = DateTime.now()
+        .add(const Duration(days: 1))
+        .toUtc();
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'editable',
+          'title': '需要提醒',
+          'isDone': false,
+          'dueDateUtc': futureDueDate.toIso8601String(),
+          'reminderEnabled': false,
+        },
+      ]),
+    });
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+    );
+
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('需要提醒'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('edit-reminder-switch')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey<String>('edit-task-title')),
+      '修改后的任务',
+    );
+    await tester.tap(find.byKey(const ValueKey<String>('save-edited-task')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('修改后的任务'), findsOneWidget);
+    expect(find.byIcon(Icons.notifications_active_outlined), findsOneWidget);
+    expect(scheduler.permissionRequestCount, 1);
+    expect(scheduler.reconciliations.last.single.reminderEnabled, isTrue);
+
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.single['title'], '修改后的任务');
+    expect(savedTasks.single['reminderEnabled'], isTrue);
+  });
+
+  testWidgets('通知权限拒绝后提醒回退关闭并可前往设置', (WidgetTester tester) async {
+    final DateTime futureDueDate = DateTime.now()
+        .add(const Duration(days: 1))
+        .toUtc();
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'permission-denied',
+          'title': '权限测试',
+          'isDone': false,
+          'dueDateUtc': futureDueDate.toIso8601String(),
+          'reminderEnabled': false,
+        },
+      ]),
+    });
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+      permission: false,
+    );
+
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('权限测试'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(const ValueKey<String>('edit-reminder-switch')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('通知权限未开启'), findsOneWidget);
+    await tester.tap(find.text('前往系统设置'));
+    await tester.pumpAndSettle();
+    expect(scheduler.settingsOpenCount, 1);
+    expect(
+      tester
+          .widget<SwitchListTile>(
+            find.byKey(const ValueKey<String>('edit-reminder-switch')),
+          )
+          .value,
+      isFalse,
+    );
+  });
+
+  testWidgets('点击通知会定位并短暂高亮对应任务', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'notification-target',
+          'title': '通知目标任务',
+          'isDone': false,
+          'dueDateUtc': null,
+          'reminderEnabled': false,
+        },
+      ]),
+    });
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler()
+      ..initialTaskId = 'notification-target';
+
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    final Finder taskCard = find.ancestor(
+      of: find.text('通知目标任务'),
+      matching: find.byType(Card),
+    );
+    expect(tester.widget<Card>(taskCard).color, const Color(0xFFFFF4C2));
+
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.widget<Card>(taskCard).color, isNull);
   });
 
   testWidgets('选择截止日期和时间后显示并随新任务保存', (WidgetTester tester) async {
@@ -322,10 +515,48 @@ void main() {
     final List<dynamic> savedTasks =
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     final DateTime savedDueDate = DateTime.parse(
-      savedTasks.last['dueDate'] as String,
+      savedTasks.last['dueDateUtc'] as String,
     );
     expect(savedDueDate.second, 0);
     expect(savedDueDate.millisecond, 0);
+  });
+
+  testWidgets('新任务选择未来截止时间后默认开启提醒', (WidgetTester tester) async {
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+    );
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('due-date-button')));
+    await tester.pumpAndSettle();
+    final CalendarDatePicker datePicker = tester.widget<CalendarDatePicker>(
+      find.byType(CalendarDatePicker),
+    );
+    datePicker.onDateChanged(DateTime.now().add(const Duration(days: 1)));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+
+    expect(scheduler.permissionRequestCount, 1);
+    expect(
+      tester
+          .widget<Switch>(
+            find.byKey(const ValueKey<String>('new-reminder-switch')),
+          )
+          .value,
+      isTrue,
+    );
+
+    await tester.enterText(find.byType(TextField).first, '默认提醒任务');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['reminderEnabled'], isTrue);
   });
 
   testWidgets('已过期且未完成的日期显示红色', (WidgetTester tester) async {

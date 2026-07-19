@@ -82,7 +82,11 @@ class TaskStorage {
       } else if (item is Map) {
         final Map<String, dynamic> taskJson = Map<String, dynamic>.from(item);
         task = Task.fromJson(taskJson);
-        if (taskJson['id'] == null || taskJson['id'].toString().isEmpty) {
+        if (taskJson['id'] == null ||
+            taskJson['id'].toString().isEmpty ||
+            taskJson.containsKey('dueDate') ||
+            !taskJson.containsKey('dueDateUtc') ||
+            !taskJson.containsKey('reminderEnabled')) {
           needsMigration = true;
         }
       } else {
@@ -101,6 +105,7 @@ class TaskStorage {
           title: task.title,
           isDone: task.isDone,
           dueDate: task.dueDate,
+          reminderEnabled: task.reminderEnabled,
         );
         usedIds.add(task.id);
         needsMigration = true;
@@ -183,6 +188,13 @@ class TaskStorage {
       if (item is! Map) {
         needsCleanup = true;
         continue;
+      }
+      final dynamic rawTask = item['task'];
+      if (rawTask is Map &&
+          (rawTask.containsKey('dueDate') ||
+              !rawTask.containsKey('dueDateUtc') ||
+              !rawTask.containsKey('reminderEnabled'))) {
+        needsCleanup = true;
       }
       final DeletedTask? deletedTask = DeletedTask.fromJson(
         Map<String, dynamic>.from(item),

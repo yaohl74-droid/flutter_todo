@@ -2,15 +2,17 @@ import 'package:flutter/material.dart';
 
 import 'pages/todo_page.dart';
 import 'services/quote_service.dart';
+import 'services/task_notification_service.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key, this.quoteService});
+  const MyApp({super.key, this.quoteService, this.notificationScheduler});
 
   final QuoteService? quoteService;
+  final TaskNotificationScheduler? notificationScheduler;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +29,10 @@ class MyApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      home: TodoPage(quoteService: quoteService),
+      home: TodoPage(
+        quoteService: quoteService,
+        notificationScheduler: notificationScheduler,
+      ),
     );
   }
 }

@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 每日一句需要在正式构建中访问 Quotable API。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="my_todo"
         android:name="${applicationName}"

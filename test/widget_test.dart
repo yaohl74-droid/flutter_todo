@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:my_todo/main.dart';
+import 'package:my_todo/quote_service.dart';
+
+class _FakeQuoteService extends QuoteService {
+  _FakeQuoteService(this._fetcher);
+
+  final Future<Quote> Function(int callCount) _fetcher;
+  int callCount = 0;
+
+  @override
+  Future<Quote> fetchQuote() => _fetcher(++callCount);
+}
+
+Widget _buildTestApp({_FakeQuoteService? quoteService}) {
+  return MyApp(
+    quoteService:
+        quoteService ??
+        _FakeQuoteService(
+          (_) async => const Quote(content: '测试名言', author: '测试作者'),
+        ),
+  );
+}
 
 void main() {
   setUp(() {
@@ -12,7 +34,7 @@ void main() {
   });
 
   testWidgets('显示待办清单', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     expect(find.text('我的待办 (0/3)'), findsOneWidget);
@@ -20,7 +42,7 @@ void main() {
     expect(find.text('写代码'), findsOneWidget);
     expect(find.text('跑步'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(3));
-    expect(find.byType(Card), findsNWidgets(3));
+    expect(find.byType(Card), findsNWidgets(4));
     expect(find.byType(Dismissible), findsNWidgets(3));
     expect(find.text('排序：按截止日期（升序）'), findsOneWidget);
     expect(find.byType(PopupMenuButton<TaskSortOrder>), findsOneWidget);
@@ -47,7 +69,7 @@ void main() {
   });
 
   testWidgets('添加非空任务并清空输入框', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
 
     await tester.enterText(find.byType(TextField), '学习 Flutter');
     await tester.tap(find.text('添加'));
@@ -64,7 +86,7 @@ void main() {
   });
 
   testWidgets('输入为空时不添加任务', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
 
     await tester.enterText(find.byType(TextField), '   ');
     await tester.tap(find.text('添加'));
@@ -74,7 +96,7 @@ void main() {
   });
 
   testWidgets('点击复选框切换任务完成样式', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
 
     final Finder firstCheckbox = find.byType(Checkbox).first;
     await tester.tap(firstCheckbox);
@@ -103,7 +125,7 @@ void main() {
       ]),
     });
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     expect(find.text('已保存任务'), findsOneWidget);
@@ -115,17 +137,21 @@ void main() {
   testWidgets('空列表显示引导提示', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({'tasks': '[]'});
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     expect(find.text('我的待办 (0/0)'), findsOneWidget);
     expect(find.byIcon(Icons.task_alt), findsOneWidget);
     expect(find.text('还没有任务,添加一条吧'), findsOneWidget);
-    expect(find.byType(Card), findsNothing);
+    expect(
+      find.byKey(const ValueKey<String>('daily-quote-card')),
+      findsOneWidget,
+    );
+    expect(find.byType(Card), findsOneWidget);
   });
 
   testWidgets('按回车提交任务并显示提示', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), '回车添加');
@@ -138,7 +164,7 @@ void main() {
   });
 
   testWidgets('添加、勾选和删除任务后自动保存', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), '持久化任务');
@@ -167,7 +193,7 @@ void main() {
   });
 
   testWidgets('左滑删除后可撤销并恢复原位置', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.drag(find.byType(Dismissible).first, const Offset(-500, 0));
@@ -220,7 +246,7 @@ void main() {
   });
 
   testWidgets('选择截止日期和时间后显示并随新任务保存', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey<String>('due-date-button')));
@@ -284,7 +310,7 @@ void main() {
       ]),
     });
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     final Text openDate = tester.widget<Text>(
@@ -317,7 +343,7 @@ void main() {
       ]),
     });
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     expect(find.text('排序：按截止日期（升序）'), findsOneWidget);
@@ -357,7 +383,7 @@ void main() {
     // 模拟重启页面，已保存的降序偏好应自动恢复。
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
     expect(find.text('排序：按截止日期（降序）'), findsOneWidget);
   });
@@ -370,7 +396,7 @@ void main() {
       ]),
     });
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     await tester.tap(find.byType(PopupMenuButton<TaskSortOrder>));
@@ -406,7 +432,7 @@ void main() {
       ]),
     });
 
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
     expect(find.text('字符串旧任务'), findsOneWidget);
@@ -418,5 +444,90 @@ void main() {
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(migratedTasks, hasLength(2));
     expect(migratedTasks.every((task) => task['id'] != null), isTrue);
+  });
+
+  testWidgets('每日一句加载成功并可手动刷新', (WidgetTester tester) async {
+    final Completer<Quote> firstRequest = Completer<Quote>();
+    final _FakeQuoteService service = _FakeQuoteService((int callCount) {
+      if (callCount == 1) {
+        return firstRequest.future;
+      }
+      return Future<Quote>.value(const Quote(content: '刷新后的名言', author: '新作者'));
+    });
+
+    await tester.pumpWidget(_buildTestApp(quoteService: service));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    firstRequest.complete(const Quote(content: '第一条名言', author: '作者甲'));
+    await tester.pumpAndSettle();
+    expect(find.text('“第一条名言”'), findsOneWidget);
+    expect(find.text('—— 作者甲'), findsOneWidget);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('refresh-quote-button')),
+    );
+    await tester.pumpAndSettle();
+    expect(service.callCount, 2);
+    expect(find.text('“刷新后的名言”'), findsOneWidget);
+    expect(find.text('—— 新作者'), findsOneWidget);
+  });
+
+  testWidgets('网络异常显示错误提示并可重试', (WidgetTester tester) async {
+    final _FakeQuoteService service = _FakeQuoteService(
+      (_) => Future<Quote>.error(const QuoteException('网络异常')),
+    );
+
+    await tester.pumpWidget(_buildTestApp(quoteService: service));
+    await tester.pumpAndSettle();
+
+    expect(find.text('无法连接,无法显示名言'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+  });
+
+  testWidgets('超时后每分钟重连且三次失败后停止', (WidgetTester tester) async {
+    final _FakeQuoteService service = _FakeQuoteService(
+      (_) => Future<Quote>.error(const QuoteTimeoutException()),
+    );
+
+    await tester.pumpWidget(_buildTestApp(quoteService: service));
+    await tester.pump();
+    expect(find.text('正在联网获取名言,请稍等'), findsOneWidget);
+    expect(service.callCount, 1);
+
+    for (int retry = 1; retry <= 3; retry++) {
+      await tester.pump(const Duration(seconds: 60));
+      await tester.pump();
+      expect(service.callCount, retry + 1);
+    }
+
+    expect(find.text('无法连接,无法显示名言'), findsOneWidget);
+    expect(find.text('重试'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 60));
+    expect(service.callCount, 4);
+  });
+
+  testWidgets('手动刷新会取消等待中的重连并重置计数', (WidgetTester tester) async {
+    final _FakeQuoteService service = _FakeQuoteService(
+      (_) => Future<Quote>.error(const QuoteTimeoutException()),
+    );
+
+    await tester.pumpWidget(_buildTestApp(quoteService: service));
+    await tester.pump();
+    expect(service.callCount, 1);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('refresh-quote-button')),
+    );
+    await tester.pump();
+    expect(service.callCount, 2);
+
+    // 60 秒后只触发手动刷新创建的新 Timer，旧 Timer 已被取消。
+    await tester.pump(const Duration(seconds: 60));
+    await tester.pump();
+    expect(service.callCount, 3);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump(const Duration(seconds: 60));
+    expect(service.callCount, 3);
   });
 }

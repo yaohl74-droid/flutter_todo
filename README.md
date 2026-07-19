@@ -1,10 +1,13 @@
 # 我的待办
 
-一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持添加任务、设置截止日期、标记完成、删除与撤销，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
+一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加任务、设置截止日期、标记完成、删除与撤销，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
 
 ## 功能
 
 - AppBar 实时显示任务进度：`我的待办 (已完成/总数)`。
+- AppBar 下方显示从每日一句接口获取的随机名言和作者，并可手动刷新。
+- 名言请求超过 8 秒会进入自动重连，每隔 60 秒重试一次，连续三次失败后停止；手动刷新会重新开始一轮尝试。
+- 名言加载、重连和失败状态都有明确提示，网络异常不会影响待办功能使用。
 - 顶部排序工具栏提供三种显示顺序：
   - 按添加顺序。
   - 按截止日期（默认），没有截止日期的排在最后。
@@ -77,6 +80,16 @@ JSON 没有原生 `DateTime` 类型，因此截止日期和时间使用标准 IS
 
 排序只影响显示：代码在 `build` 使用 `List<Task>.of(_tasks)` 创建副本后排序，从不直接修改 `_tasks`。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，撤销时可以恢复到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
+## 每日一句
+
+`QuoteService` 使用 `http` 包请求 `https://uapis.cn/api/v1/saying`，并把响应中的 `text` 转换为 `Quote`；该接口不返回作者，因此统一显示“佚名”。接口支持浏览器跨域访问，可用于 Flutter Web。页面通过 `FutureBuilder<Quote>` 展示单次请求的加载、成功和失败状态；定时重连由 `TodoPage` 的 `QuoteLoadStage` 状态枚举和 `Timer` 管理，不与展示逻辑混在一起。
+
+- 单次请求超时：8 秒。
+- 自动重连间隔：60 秒。
+- 最大自动重连次数：3 次。
+- 等待及重连期间可随时点击刷新，取消旧 Timer 并把计数清零。
+- 页面销毁时会取消 Timer，避免延迟回调访问已经销毁的 State。
+
 `initState` 是 `State` 创建后只执行一次的初始化方法，因此适合启动读取。它本身不能声明为 `async`，所以实际异步工作放在单独方法中，并使用 `async/await` 等待读写完成。
 
 异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。撤销回调也在恢复任务前执行该检查。
@@ -108,6 +121,12 @@ JSON 没有原生 `DateTime` 类型，因此截止日期和时间使用标准 IS
 - Windows
 - Linux
 
+每日一句需要各平台允许出站 HTTPS 请求：
+
+- Android 主清单声明 `android.permission.INTERNET`，确保正式构建可以联网。
+- macOS 的 Debug/Profile 与 Release entitlement 都启用 `com.apple.security.network.client`；只配置 `network.server` 不能授权 App 主动访问接口。
+- Web 使用支持 CORS 的 UAPI 接口，可从 `localhost` 等浏览器来源直接请求。
+
 数据保存在当前设备和当前应用的本地存储中，不是云同步：
 
 - 不同设备之间不会自动共享任务。
@@ -129,6 +148,12 @@ flutter pub get
 flutter pub add shared_preferences
 ```
 
+每日一句使用 `http` 包：
+
+```bash
+flutter pub add http
+```
+
 当前使用的主要依赖：
 
 ```yaml
@@ -137,6 +162,7 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.5
+  http: ^1.6.0
 ```
 
 ## 运行
@@ -195,19 +221,25 @@ flutter analyze
 - `Dismissible` key 唯一性
 - 旧 JSON 缺少 ID 时自动补全
 - 旧字符串数组迁移和损坏记录容错
+- 每日一句加载、成功、网络错误和手动刷新状态
+- 8 秒请求超时、每隔 60 秒自动重连、连续三次失败后停止
+- 手动刷新取消旧 Timer、重置重连计数，以及页面销毁时取消 Timer
+- UAPI `text` 响应解析、作者回退为“佚名”和网络异常转换
 
 ## 项目结构
 
 ```text
-lib/main.dart          App 入口、Task 模型、页面、交互及持久化逻辑
-test/widget_test.dart  Widget 测试、持久化测试和旧数据兼容测试
-pubspec.yaml           Flutter 配置与依赖
-android/               Android 工程
-ios/                   iOS 工程
-web/                   Web 工程
-macos/                 macOS 工程
-windows/               Windows 工程
-linux/                 Linux 工程
+lib/main.dart                 App 入口、Task 模型、页面、交互及状态管理
+lib/quote_service.dart        名言模型、HTTP 请求、超时和异常转换
+test/widget_test.dart         Widget、持久化、兼容与重连状态机测试
+test/quote_service_test.dart  名言响应解析、超时和网络异常测试
+pubspec.yaml                  Flutter 配置与依赖
+android/                      Android 工程及正式网络权限
+ios/                          iOS 工程
+web/                          Web 工程
+macos/                        macOS 工程及沙箱网络权限
+windows/                      Windows 工程
+linux/                        Linux 工程
 ```
 
 当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后异步写入本地存储。

@@ -1,14 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'quote_service.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({super.key, this.quoteService});
+
+  final QuoteService? quoteService;
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +30,7 @@ class MyApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      home: const TodoPage(),
+      home: TodoPage(quoteService: quoteService),
     );
   }
 }
@@ -76,10 +81,14 @@ class Task {
 
 enum TaskSortOrder { added, dueDate, completion }
 
+enum QuoteLoadStage { idle, loading, retrying, failed }
+
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key});
+  const TodoPage({super.key, this.quoteService});
+
+  final QuoteService? quoteService;
 
   @override
   State<TodoPage> createState() => _TodoPageState();
@@ -89,6 +98,8 @@ class _TodoPageState extends State<TodoPage> {
   static const String _tasksStorageKey = 'tasks';
   static const String _sortOrderStorageKey = 'task_sort_order';
   static const String _sortAscendingStorageKey = 'task_sort_ascending';
+  static const int _maxQuoteRetries = 3;
+  static const Duration _quoteRetryDelay = Duration(seconds: 60);
 
   final List<Task> _tasks = [
     Task(title: '买菜'),
@@ -99,10 +110,18 @@ class _TodoPageState extends State<TodoPage> {
   DateTime? _selectedDueDate;
   TaskSortOrder _sortOrder = TaskSortOrder.dueDate;
   bool _sortAscending = true;
+  late final QuoteService _quoteService;
+  late Future<Quote> _quoteFuture;
+  QuoteLoadStage _quoteStage = QuoteLoadStage.idle;
+  Timer? _quoteRetryTimer;
+  int _quoteRetryCount = 0;
+  int _quoteRequestId = 0;
 
   @override
   void initState() {
     super.initState();
+    _quoteService = widget.quoteService ?? QuoteService();
+    _startQuoteRequest(stage: QuoteLoadStage.loading, notify: false);
     // initState 是 State 创建后只执行一次的初始化方法，适合在页面启动时读取存档。
     // initState 本身不能标记为 async，所以把异步读取放到单独的方法中调用。
     _loadTasks();
@@ -366,9 +385,146 @@ class _TodoPageState extends State<TodoPage> {
 
   @override
   void dispose() {
+    // 页面销毁后必须取消等待中的重连，避免 Timer 回调对已销毁页面 setState。
+    _quoteRetryTimer?.cancel();
     // 页面销毁时释放输入控制器，避免占用不再需要的资源。
     _taskController.dispose();
     super.dispose();
+  }
+
+  void _startQuoteRequest({
+    required QuoteLoadStage stage,
+    required bool notify,
+  }) {
+    final int requestId = ++_quoteRequestId;
+    final Future<Quote> request = _quoteService.fetchQuote();
+
+    void updateRequest() {
+      _quoteStage = stage;
+      _quoteFuture = request;
+    }
+
+    if (notify) {
+      setState(updateRequest);
+    } else {
+      updateRequest();
+    }
+
+    // FutureBuilder 只展示这一次请求；超时后的定时重连由 State 统一调度。
+    request.then<void>(
+      (_) {
+        if (!mounted || requestId != _quoteRequestId) {
+          return;
+        }
+        _quoteRetryTimer?.cancel();
+        setState(() {
+          _quoteRetryCount = 0;
+          _quoteStage = QuoteLoadStage.idle;
+        });
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!mounted || requestId != _quoteRequestId) {
+          return;
+        }
+        if (error is QuoteTimeoutException &&
+            _quoteRetryCount < _maxQuoteRetries) {
+          _scheduleQuoteRetry();
+          return;
+        }
+        setState(() {
+          _quoteStage = QuoteLoadStage.failed;
+        });
+      },
+    );
+  }
+
+  void _scheduleQuoteRetry() {
+    _quoteRetryTimer?.cancel();
+    setState(() {
+      _quoteStage = QuoteLoadStage.retrying;
+    });
+    _quoteRetryTimer = Timer(_quoteRetryDelay, () {
+      if (!mounted) {
+        return;
+      }
+      _quoteRetryCount++;
+      _startQuoteRequest(stage: QuoteLoadStage.retrying, notify: true);
+    });
+  }
+
+  void _refreshQuote() {
+    // 手动刷新代表一轮全新尝试：取消旧 Timer，并重置自动重连次数。
+    _quoteRetryTimer?.cancel();
+    _quoteRetryCount = 0;
+    _startQuoteRequest(stage: QuoteLoadStage.loading, notify: true);
+  }
+
+  Widget _buildQuoteCard() {
+    return Card(
+      key: const ValueKey<String>('daily-quote-card'),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Expanded(
+              child: FutureBuilder<Quote>(
+                future: _quoteFuture,
+                builder: (context, snapshot) {
+                  if (_quoteStage == QuoteLoadStage.retrying) {
+                    return const Text('正在联网获取名言,请稍等');
+                  }
+
+                  // FutureBuilder 的三种状态：waiting 表示加载中；hasError
+                  // 表示本次请求失败；hasData 表示请求成功并可安全展示名言。
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError ||
+                      _quoteStage == QuoteLoadStage.failed) {
+                    final String message = _quoteStage == QuoteLoadStage.failed
+                        ? '无法连接,无法显示名言'
+                        : '获取名言失败';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(message),
+                        TextButton(
+                          onPressed: _refreshQuote,
+                          child: const Text('重试'),
+                        ),
+                      ],
+                    );
+                  }
+                  if (snapshot.hasData) {
+                    final Quote quote = snapshot.data!;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('“${quote.content}”'),
+                        const SizedBox(height: 6),
+                        Text(
+                          '—— ${quote.author}',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    );
+                  }
+
+                  return const Text('暂无名言');
+                },
+              ),
+            ),
+            IconButton(
+              key: const ValueKey<String>('refresh-quote-button'),
+              tooltip: '刷新名言',
+              onPressed: _refreshQuote,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   String _formatDateTime(DateTime date) {
@@ -468,6 +624,7 @@ class _TodoPageState extends State<TodoPage> {
       ),
       body: Column(
         children: [
+          _buildQuoteCard(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
             child: Row(

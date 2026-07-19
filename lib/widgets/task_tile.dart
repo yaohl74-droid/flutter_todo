@@ -80,7 +80,10 @@ class TaskTile extends StatelessWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (task.reminderEnabled && !task.isDone)
+                if (task.reminderEnabled &&
+                    !task.isDone &&
+                    task.dueDate != null &&
+                    task.dueDate!.isAfter(DateTime.now()))
                   const Tooltip(
                     message: '已开启到期提醒',
                     child: Icon(

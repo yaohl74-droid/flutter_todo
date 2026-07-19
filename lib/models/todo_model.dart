@@ -6,6 +6,13 @@ import 'task.dart';
 
 enum TaskSortOrder { added, dueDate, completion }
 
+class TodoPersistenceFailure {
+  const TodoPersistenceFailure({required this.revision, required this.action});
+
+  final int revision;
+  final String action;
+}
+
 /// 待办任务的业务状态：统一管理任务、回收站、排序和本地持久化。
 class TodoModel extends ChangeNotifier {
   TodoModel({TaskStorage? storage}) : _storage = storage ?? TaskStorage();
@@ -22,7 +29,9 @@ class TodoModel extends ChangeNotifier {
   bool _sortAscending = true;
   bool _isLoaded = false;
   bool _isDisposed = false;
-  int _taskRevision = 0;
+  int _reminderRevision = 0;
+  int _persistenceFailureRevision = 0;
+  TodoPersistenceFailure? _persistenceFailure;
   Future<void>? _loadFuture;
 
   List<Task> get tasks => List<Task>.unmodifiable(_tasks);
@@ -31,7 +40,10 @@ class TodoModel extends ChangeNotifier {
   TaskSortOrder get sortOrder => _sortOrder;
   bool get sortAscending => _sortAscending;
   bool get isLoaded => _isLoaded;
-  int get taskRevision => _taskRevision;
+
+  /// 只有可能改变系统提醒队列的任务变化才递增。
+  int get reminderRevision => _reminderRevision;
+  TodoPersistenceFailure? get persistenceFailure => _persistenceFailure;
 
   int get completedCount => _tasks.where((task) => task.isDone).length;
 
@@ -110,7 +122,7 @@ class TodoModel extends ChangeNotifier {
       ..clear()
       ..addAll(snapshot.deletedTasks);
     _isLoaded = true;
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
   }
 
@@ -124,9 +136,7 @@ class TodoModel extends ChangeNotifier {
       return false;
     }
     final bool effectiveReminder =
-        reminderEnabled &&
-        dueDate != null &&
-        dueDate.isAfter(DateTime.now().toUtc());
+        reminderEnabled && dueDate != null && dueDate.isAfter(DateTime.now());
     _tasks.add(
       Task(
         title: trimmedTitle,
@@ -134,9 +144,9 @@ class TodoModel extends ChangeNotifier {
         reminderEnabled: effectiveReminder,
       ),
     );
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
-    await _storage.save(tasks: _tasks);
+    await _persist('保存新增任务', () => _storage.save(tasks: _tasks));
     return true;
   }
 
@@ -145,9 +155,9 @@ class TodoModel extends ChangeNotifier {
       return;
     }
     task.isDone = isDone ?? false;
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
-    await _storage.save(tasks: _tasks);
+    await _persist('保存任务状态', () => _storage.save(tasks: _tasks));
   }
 
   Future<void> updateTask(
@@ -163,9 +173,9 @@ class TodoModel extends ChangeNotifier {
       ..title = title.trim()
       ..dueDate = dueDate
       ..reminderEnabled = reminderEnabled;
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
-    await _storage.save(tasks: _tasks);
+    await _persist('保存任务修改', () => _storage.save(tasks: _tasks));
   }
 
   Future<void> deleteTask(Task task) async {
@@ -181,9 +191,12 @@ class TodoModel extends ChangeNotifier {
         originalIndex: originalIndex,
       ),
     );
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
-    await _storage.save(tasks: _tasks, deletedTasks: _deletedTasks);
+    await _persist(
+      '保存删除操作',
+      () => _storage.save(tasks: _tasks, deletedTasks: _deletedTasks),
+    );
   }
 
   Future<void> restoreDeletedTask(DeletedTask deletedTask) async {
@@ -194,9 +207,12 @@ class TodoModel extends ChangeNotifier {
         ? _tasks.length
         : deletedTask.originalIndex;
     _tasks.insert(restoredIndex, deletedTask.task);
-    _taskRevision++;
+    _reminderRevision++;
     notifyListeners();
-    await _storage.save(tasks: _tasks, deletedTasks: _deletedTasks);
+    await _persist(
+      '保存恢复操作',
+      () => _storage.save(tasks: _tasks, deletedTasks: _deletedTasks),
+    );
   }
 
   Future<void> purgeExpiredDeletedTasks() async {
@@ -206,20 +222,48 @@ class TodoModel extends ChangeNotifier {
     if (_deletedTasks.length == previousLength) {
       return;
     }
+    // 这里只改变回收站，不影响活动任务和系统提醒，因此不递增 reminderRevision。
     notifyListeners();
-    await _storage.save(deletedTasks: _deletedTasks);
+    await _persist('清理回收站', () => _storage.save(deletedTasks: _deletedTasks));
   }
 
   Future<void> setSortOrder(TaskSortOrder order) async {
     _sortOrder = order;
     notifyListeners();
-    await _storage.save(sortOrder: order.name);
+    await _persist('保存排序方式', () => _storage.save(sortOrder: order.name));
   }
 
   Future<void> toggleSortDirection() async {
     _sortAscending = !_sortAscending;
     notifyListeners();
-    await _storage.save(sortAscending: _sortAscending);
+    await _persist(
+      '保存排序方向',
+      () => _storage.save(sortAscending: _sortAscending),
+    );
+  }
+
+  /// 用户可从错误提示中重试，把当前完整状态重新写入本地存储。
+  Future<void> retryPersistence() => _persist(
+    '重新保存任务',
+    () => _storage.save(
+      tasks: _tasks,
+      deletedTasks: _deletedTasks,
+      sortOrder: _sortOrder.name,
+      sortAscending: _sortAscending,
+    ),
+  );
+
+  Future<void> _persist(String action, Future<void> Function() save) async {
+    try {
+      await save();
+    } on Exception {
+      // UI 回调通常不会 await Future，因此在模型内部统一截获并发布可展示的错误。
+      _persistenceFailure = TodoPersistenceFailure(
+        revision: ++_persistenceFailureRevision,
+        action: action,
+      );
+      notifyListeners();
+    }
   }
 
   @override

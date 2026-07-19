@@ -37,6 +37,7 @@
 - 回收站任务保留 7 天，可恢复到删除前的位置；过期任务会自动清理。
 - 当任务列表为空时，页面中央显示大图标和“还没有任务,添加一条吧”。
 - 添加、编辑、勾选、删除和从回收站恢复操作都会自动保存。
+- 本地写入异常由 `TodoModel` 统一捕获，页面会显示保存失败提示和“重试”按钮，不会产生无人处理的异步异常。
 - 使用柔和绿色主题；输入框获得焦点时显示绿色高亮边框。
 - 任务使用带圆角和轻微阴影的 Card 展示，卡片之间保留间距。
 
@@ -101,6 +102,8 @@ class DeletedTask {
 - 首次运行：没有 `tasks` 存档时，把三条示例任务立即写入本地
 
 `TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入。`TodoModel extends ChangeNotifier` 持有任务列表、回收站和排序状态，调用存储层并在数据变化后执行 `notifyListeners()`；页面和任务组件通过 `context.watch` / `context.read` 展示与修改数据。
+
+`TodoModel.reminderRevision` 只在活动任务的新增、编辑、完成、删除、恢复或启动加载可能改变系统通知队列时递增，页面据此触发提醒对账。排序和过期回收站清理虽然也会 `notifyListeners()` 更新界面，但不会改变活动提醒，因此不递增该版本号。所有保存异常都在模型内部转换为带递增编号的 `TodoPersistenceFailure`，页面只展示一次错误，并允许把当前完整状态重新写入本地。
 
 排序只影响显示：`TodoModel.displayedTasks` 使用任务列表副本排序，从不直接修改原始列表。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
@@ -314,6 +317,7 @@ test/widget_test.dart            Widget、持久化、兼容与重连状态机�
 test/quote_service_test.dart     名言响应解析、超时和网络异常测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
 test/task_model_test.dart        Task 过期业务规则与公共日期格式测试
+test/todo_model_test.dart        Provider 保存失败事件与提醒版本规则测试
 pubspec.yaml                     Flutter 配置与依赖
 android/                         Android 工程及正式网络权限
 ios/                             iOS 工程

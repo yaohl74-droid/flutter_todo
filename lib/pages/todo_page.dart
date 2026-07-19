@@ -44,7 +44,8 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   String? _highlightedTaskId;
   String? _pendingTaskSelection;
   TodoModel? _todoModel;
-  int _lastTaskRevision = 0;
+  int _lastReminderRevision = 0;
+  int _lastPersistenceFailureRevision = 0;
   bool _didInitializeTasksAndReminders = false;
   bool _notificationsInitialized = false;
 
@@ -65,7 +66,8 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     if (!identical(_todoModel, model)) {
       _todoModel?.removeListener(_handleTodoModelChanged);
       _todoModel = model;
-      _lastTaskRevision = model.taskRevision;
+      _lastReminderRevision = model.reminderRevision;
+      _lastPersistenceFailureRevision = model.persistenceFailure?.revision ?? 0;
       model.addListener(_handleTodoModelChanged);
     }
     if (!_didInitializeTasksAndReminders) {
@@ -76,10 +78,35 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
 
   void _handleTodoModelChanged() {
     final TodoModel? model = _todoModel;
-    if (model == null || model.taskRevision == _lastTaskRevision) {
+    if (model == null) {
       return;
     }
-    _lastTaskRevision = model.taskRevision;
+
+    final TodoPersistenceFailure? failure = model.persistenceFailure;
+    if (failure != null &&
+        failure.revision != _lastPersistenceFailureRevision) {
+      _lastPersistenceFailureRevision = failure.revision;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${failure.action}失败，本次更改可能未写入本地'),
+            action: SnackBarAction(
+              label: '重试',
+              onPressed: model.retryPersistence,
+            ),
+          ),
+        );
+      });
+    }
+
+    if (model.reminderRevision != _lastReminderRevision) {
+      _lastReminderRevision = model.reminderRevision;
+    } else {
+      return;
+    }
     if (_notificationsInitialized) {
       _reconcileReminders();
     }

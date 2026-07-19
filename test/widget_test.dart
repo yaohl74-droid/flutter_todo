@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:my_todo/main.dart';
 import 'package:my_todo/models/task.dart';
-import 'package:my_todo/pages/todo_page.dart';
+import 'package:my_todo/models/todo_model.dart';
 import 'package:my_todo/services/quote_service.dart';
 import 'package:my_todo/services/task_notification_service.dart';
 

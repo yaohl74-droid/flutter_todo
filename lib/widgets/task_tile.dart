@@ -1,25 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../models/task.dart';
+import '../models/todo_model.dart';
 import '../utils/date_format.dart';
 
-/// 单条任务的纯展示组件；所有修改动作都通过回调交还页面 State。
+/// 单条任务组件；通过 Provider 修改任务，编辑弹窗仍交由页面打开。
 class TaskTile extends StatelessWidget {
   const TaskTile({
     super.key,
     required this.task,
     required this.contentKey,
     required this.highlighted,
-    required this.onToggle,
-    required this.onDelete,
     required this.onEdit,
   });
 
   final Task task;
   final Key contentKey;
   final bool highlighted;
-  final ValueChanged<bool?> onToggle;
-  final VoidCallback onDelete;
   final VoidCallback onEdit;
 
   @override
@@ -28,7 +26,7 @@ class TaskTile extends StatelessWidget {
     return Dismissible(
       key: ValueKey<String>(task.id),
       direction: DismissDirection.endToStart,
-      onDismissed: (_) => onDelete(),
+      onDismissed: (_) => context.read<TodoModel>().deleteTask(task),
       background: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 24),
@@ -57,7 +55,11 @@ class TaskTile extends StatelessWidget {
           ),
           child: ListTile(
             onTap: onEdit,
-            leading: Checkbox(value: task.isDone, onChanged: onToggle),
+            leading: Checkbox(
+              value: task.isDone,
+              onChanged: (isDone) =>
+                  context.read<TodoModel>().toggleTask(task, isDone),
+            ),
             title: Text(
               task.title,
               style: TextStyle(
@@ -89,7 +91,7 @@ class TaskTile extends StatelessWidget {
                   ),
                 IconButton(
                   tooltip: '删除任务',
-                  onPressed: onDelete,
+                  onPressed: () => context.read<TodoModel>().deleteTask(task),
                   icon: const Icon(Icons.delete_outline),
                 ),
               ],

@@ -1,18 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../models/deleted_task.dart';
 import '../models/task.dart';
+import '../models/todo_model.dart';
 import '../services/quote_service.dart';
 import '../services/task_notification_service.dart';
-import '../services/task_storage.dart';
 import '../utils/date_format.dart';
 import '../widgets/quote_card.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
-
-enum TaskSortOrder { added, dueDate, completion }
 
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
@@ -30,18 +29,9 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   static const int _maxQuoteRetries = 3;
   static const Duration _quoteRetryDelay = Duration(seconds: 60);
 
-  final List<Task> _tasks = [
-    Task(title: '买菜'),
-    Task(title: '写代码'),
-    Task(title: '跑步'),
-  ];
-  final List<DeletedTask> _deletedTasks = [];
   final TextEditingController _taskController = TextEditingController();
-  final TaskStorage _taskStorage = TaskStorage();
   DateTime? _selectedDueDate;
   bool _selectedReminderEnabled = false;
-  TaskSortOrder _sortOrder = TaskSortOrder.dueDate;
-  bool _sortAscending = true;
   late final QuoteService _quoteService;
   late Future<Quote> _quoteFuture;
   QuoteLoadStage _quoteStage = QuoteLoadStage.idle;
@@ -53,7 +43,10 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   Timer? _highlightTimer;
   String? _highlightedTaskId;
   String? _pendingTaskSelection;
-  bool _tasksLoaded = false;
+  TodoModel? _todoModel;
+  int _lastTaskRevision = 0;
+  bool _didInitializeTasksAndReminders = false;
+  bool _notificationsInitialized = false;
 
   @override
   void initState() {
@@ -63,19 +56,44 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     _notificationScheduler =
         widget.notificationScheduler ?? TaskNotificationService();
     _startQuoteRequest(stage: QuoteLoadStage.loading, notify: false);
-    // initState 是 State 创建后只执行一次的初始化方法，适合在页面启动时读取存档。
-    // initState 本身不能标记为 async，所以把异步读取放到单独的方法中调用。
-    _initializeTasksAndReminders();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final TodoModel model = context.read<TodoModel>();
+    if (!identical(_todoModel, model)) {
+      _todoModel?.removeListener(_handleTodoModelChanged);
+      _todoModel = model;
+      _lastTaskRevision = model.taskRevision;
+      model.addListener(_handleTodoModelChanged);
+    }
+    if (!_didInitializeTasksAndReminders) {
+      _didInitializeTasksAndReminders = true;
+      _initializeTasksAndReminders();
+    }
+  }
+
+  void _handleTodoModelChanged() {
+    final TodoModel? model = _todoModel;
+    if (model == null || model.taskRevision == _lastTaskRevision) {
+      return;
+    }
+    _lastTaskRevision = model.taskRevision;
+    if (_notificationsInitialized) {
+      _reconcileReminders();
+    }
   }
 
   Future<void> _initializeTasksAndReminders() async {
     final String? initialTaskId = await _notificationScheduler.initialize(
       onTaskSelected: _selectTaskFromNotification,
     );
-    await _loadTasks();
+    await _todoModel!.load();
     if (!mounted) {
       return;
     }
+    _notificationsInitialized = true;
     await _reconcileReminders();
     final String? taskId = initialTaskId ?? _pendingTaskSelection;
     if (taskId != null) {
@@ -92,15 +110,16 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   }
 
   Future<void> _reconcileReminders() =>
-      _notificationScheduler.reconcile(List<Task>.of(_tasks));
+      _notificationScheduler.reconcile(List<Task>.of(_todoModel!.tasks));
 
   void _selectTaskFromNotification(String taskId) {
     if (!mounted) {
       return;
     }
-    if (!_tasks.any((task) => task.id == taskId)) {
+    final TodoModel model = _todoModel!;
+    if (!model.tasks.any((task) => task.id == taskId)) {
       // 数据读取前先暂存；读取后仍找不到说明任务已删除，只正常停留首页。
-      _pendingTaskSelection = _tasksLoaded ? null : taskId;
+      _pendingTaskSelection = model.isLoaded ? null : taskId;
       return;
     }
     _pendingTaskSelection = null;
@@ -125,86 +144,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
         });
       }
     });
-  }
-
-  Future<void> _loadTasks() async {
-    final TaskStorageSnapshot snapshot = await _taskStorage.load(
-      fallbackTasks: _tasks,
-    );
-    final TaskSortOrder restoredSortOrder = TaskSortOrder.values.firstWhere(
-      (order) => order.name == snapshot.sortOrder,
-      orElse: () => TaskSortOrder.dueDate,
-    );
-
-    // 异步读取结束时页面可能已被销毁，mounted 可避免更新已销毁的 State。
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _sortOrder = restoredSortOrder;
-      _sortAscending = snapshot.sortAscending;
-      if (snapshot.tasks != null) {
-        _tasks
-          ..clear()
-          ..addAll(snapshot.tasks!);
-      }
-      _deletedTasks
-        ..clear()
-        ..addAll(snapshot.deletedTasks);
-      _tasksLoaded = true;
-    });
-  }
-
-  Future<void> _setSortOrder(TaskSortOrder order) async {
-    setState(() {
-      _sortOrder = order;
-    });
-    await _taskStorage.save(sortOrder: order.name);
-  }
-
-  Future<void> _toggleSortDirection() async {
-    setState(() {
-      _sortAscending = !_sortAscending;
-    });
-    await _taskStorage.save(sortAscending: _sortAscending);
-  }
-
-  Future<void> _addTask() async {
-    final String task = _taskController.text.trim();
-
-    // 输入为空或只有空格时，不添加任务。
-    if (task.isEmpty) {
-      return;
-    }
-
-    // setState 告诉 Flutter 状态已经改变，需要重新执行 build 方法，
-    // 这样新加入 _tasks 的任务才会显示在界面上。
-    final DateTime? dueDate = _selectedDueDate;
-    final bool reminderEnabled =
-        _selectedReminderEnabled &&
-        dueDate != null &&
-        dueDate.isAfter(DateTime.now().toUtc());
-    setState(() {
-      _tasks.add(
-        Task(title: task, dueDate: dueDate, reminderEnabled: reminderEnabled),
-      );
-      // 截止日期只属于本次新任务，添加后清空，避免带到下一条任务。
-      _selectedDueDate = null;
-      _selectedReminderEnabled = false;
-    });
-    _taskController.clear();
-    await _taskStorage.save(tasks: _tasks);
-    await _reconcileReminders();
-
-    if (!mounted) {
-      return;
-    }
-
-    // 添加成功后给用户一个短暂反馈，不会打断继续输入。
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加')));
   }
 
   Future<void> _pickDueDateTime() async {
@@ -452,11 +391,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                   if (editedTitle.trim().isEmpty) {
                     return;
                   }
-                  task
-                    ..title = editedTitle.trim()
-                    ..dueDate = editedDueDate?.toUtc()
-                    ..reminderEnabled =
-                        editedReminderEnabled && _canRemindAt(editedDueDate);
                   Navigator.pop(dialogContext, true);
                 },
                 child: const Text('保存'),
@@ -466,74 +400,18 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
         },
       ),
     );
-    if (saved == true) {
-      setState(() {});
-      await _taskStorage.save(tasks: _tasks);
-      await _reconcileReminders();
-    }
-  }
-
-  Future<void> _toggleTask(Task task, bool? isDone) async {
-    // 完成状态属于页面数据，必须在 setState 中修改，界面才会重新构建。
-    setState(() {
-      task.isDone = isDone ?? false;
-    });
-    await _taskStorage.save(tasks: _tasks);
-    await _reconcileReminders();
-  }
-
-  Future<void> _deleteTask(Task task) async {
-    final int originalIndex = _tasks.indexOf(task);
-    if (originalIndex == -1) {
-      return;
-    }
-
-    final DeletedTask deletedTask = DeletedTask(
-      task: task,
-      deletedAt: DateTime.now(),
-      originalIndex: originalIndex,
-    );
-    setState(() {
-      _tasks.removeAt(originalIndex);
-      _deletedTasks.add(deletedTask);
-    });
-
-    // 删除后直接进入回收站，不再显示会遮挡底部输入框的撤销 SnackBar。
-    await _taskStorage.save(tasks: _tasks, deletedTasks: _deletedTasks);
-    await _reconcileReminders();
-  }
-
-  Future<void> _restoreDeletedTask(DeletedTask deletedTask) async {
-    if (!mounted) {
-      return;
-    }
-
-    // 若恢复前列表又发生变化，确保插入位置仍在当前列表的有效范围内。
-    final int restoredIndex = deletedTask.originalIndex > _tasks.length
-        ? _tasks.length
-        : deletedTask.originalIndex;
-
-    setState(() {
-      _deletedTasks.remove(deletedTask);
-      _tasks.insert(restoredIndex, deletedTask.task);
-    });
-    await _taskStorage.save(tasks: _tasks, deletedTasks: _deletedTasks);
-    await _reconcileReminders();
-  }
-
-  Future<void> _purgeExpiredDeletedTasks() async {
-    final DateTime cutoff = DateTime.now().subtract(TaskStorage.trashRetention);
-    final int previousLength = _deletedTasks.length;
-    setState(() {
-      _deletedTasks.removeWhere((item) => !item.deletedAt.isAfter(cutoff));
-    });
-    if (_deletedTasks.length != previousLength) {
-      await _taskStorage.save(deletedTasks: _deletedTasks);
+    if (saved == true && mounted) {
+      await context.read<TodoModel>().updateTask(
+        task,
+        title: editedTitle,
+        dueDate: editedDueDate?.toUtc(),
+        reminderEnabled: editedReminderEnabled && _canRemindAt(editedDueDate),
+      );
     }
   }
 
   Future<void> _showTrash() async {
-    await _purgeExpiredDeletedTasks();
+    await context.read<TodoModel>().purgeExpiredDeletedTasks();
     if (!mounted) {
       return;
     }
@@ -542,8 +420,8 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
+        return Consumer<TodoModel>(
+          builder: (context, todoModel, child) {
             return SafeArea(
               child: SizedBox(
                 height: 360,
@@ -558,28 +436,24 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 8),
                     Expanded(
-                      child: _deletedTasks.isEmpty
+                      child: todoModel.deletedTasks.isEmpty
                           ? const Center(child: Text('回收站是空的'))
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                              itemCount: _deletedTasks.length,
+                              itemCount: todoModel.deletedTasks.length,
                               separatorBuilder: (context, index) =>
                                   const Divider(),
                               itemBuilder: (context, index) {
                                 final DeletedTask deletedTask =
-                                    _deletedTasks[index];
+                                    todoModel.deletedTasks[index];
                                 return ListTile(
                                   title: Text(deletedTask.task.title),
                                   trailing: TextButton.icon(
                                     key: ValueKey<String>(
                                       'restore-${deletedTask.task.id}',
                                     ),
-                                    onPressed: () async {
-                                      await _restoreDeletedTask(deletedTask);
-                                      if (sheetContext.mounted) {
-                                        setSheetState(() {});
-                                      }
-                                    },
+                                    onPressed: () => todoModel
+                                        .restoreDeletedTask(deletedTask),
                                     icon: const Icon(Icons.restore),
                                     label: const Text('恢复'),
                                   ),
@@ -600,6 +474,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _todoModel?.removeListener(_handleTodoModelChanged);
     _highlightTimer?.cancel();
     // 页面销毁后必须取消等待中的重连，避免 Timer 回调对已销毁页面 setState。
     _quoteRetryTimer?.cancel();
@@ -676,69 +551,18 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     _startQuoteRequest(stage: QuoteLoadStage.loading, notify: true);
   }
 
-  int get _activeDeletedTaskCount {
-    final DateTime cutoff = DateTime.now().subtract(TaskStorage.trashRetention);
-    return _deletedTasks.where((item) => item.deletedAt.isAfter(cutoff)).length;
-  }
-
-  String get _sortOrderLabel {
-    return switch (_sortOrder) {
-      TaskSortOrder.added => '按添加顺序',
-      TaskSortOrder.dueDate => '按截止日期',
-      TaskSortOrder.completion => '按完成状态',
-    };
-  }
-
-  List<Task> get _displayedTasks {
-    final List<Task> displayedTasks = List<Task>.of(_tasks);
-    final Map<String, int> originalIndexes = {
-      for (int index = 0; index < _tasks.length; index++)
-        _tasks[index].id: index,
-    };
-
-    displayedTasks.sort((first, second) {
-      int comparison;
-      switch (_sortOrder) {
-        case TaskSortOrder.added:
-          comparison = originalIndexes[first.id]!.compareTo(
-            originalIndexes[second.id]!,
-          );
-          break;
-        case TaskSortOrder.dueDate:
-          if (first.dueDate == null && second.dueDate == null) {
-            comparison = 0;
-          } else if (first.dueDate == null) {
-            // 这里直接返回并跳过下方的升降序翻转，保证无日期任务始终排在最后。
-            return 1;
-          } else if (second.dueDate == null) {
-            return -1;
-          } else {
-            comparison = first.dueDate!.compareTo(second.dueDate!);
-          }
-          break;
-        case TaskSortOrder.completion:
-          comparison = (first.isDone ? 1 : 0).compareTo(second.isDone ? 1 : 0);
-          break;
-      }
-
-      if (comparison != 0) {
-        return _sortAscending ? comparison : -comparison;
-      }
-      return originalIndexes[first.id]!.compareTo(originalIndexes[second.id]!);
-    });
-    return displayedTasks;
-  }
-
   @override
   Widget build(BuildContext context) {
-    // 每次状态变化重新 build 时统计，标题会立即反映最新完成进度。
-    final int completedCount = _tasks.where((task) => task.isDone).length;
-    final List<Task> displayedTasks = _displayedTasks;
+    // watch 订阅 TodoModel；任务或排序变化时页面会自动重建。
+    final TodoModel todoModel = context.watch<TodoModel>();
+    final List<Task> displayedTasks = todoModel.displayedTasks;
 
     // Scaffold 是 Material Design 页面结构，提供 AppBar、主体等常用区域。
     return Scaffold(
       appBar: AppBar(
-        title: Text('我的待办 ($completedCount/${_tasks.length})'),
+        title: Text(
+          '我的待办 (${todoModel.completedCount}/${todoModel.tasks.length})',
+        ),
         centerTitle: true,
       ),
       body: Column(
@@ -754,19 +578,20 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
               children: [
                 Expanded(
                   child: Text(
-                    '排序：$_sortOrderLabel（${_sortAscending ? '升序' : '降序'}）',
+                    '排序：${todoModel.sortOrderLabel}'
+                    '（${todoModel.sortAscending ? '升序' : '降序'}）',
                     style: const TextStyle(color: Color(0xFF4F6F56)),
                   ),
                 ),
                 PopupMenuButton<TaskSortOrder>(
-                  initialValue: _sortOrder,
+                  initialValue: todoModel.sortOrder,
                   tooltip: '选择排序方式',
-                  onSelected: _setSortOrder,
+                  onSelected: context.read<TodoModel>().setSortOrder,
                   itemBuilder: (context) => TaskSortOrder.values
                       .map(
                         (order) => CheckedPopupMenuItem<TaskSortOrder>(
                           value: order,
-                          checked: order == _sortOrder,
+                          checked: order == todoModel.sortOrder,
                           child: Text(switch (order) {
                             TaskSortOrder.added => '按添加顺序',
                             TaskSortOrder.dueDate => '按截止日期',
@@ -779,10 +604,12 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                 ),
                 IconButton(
                   key: const ValueKey<String>('sort-direction-button'),
-                  tooltip: _sortAscending ? '切换为降序' : '切换为升序',
-                  onPressed: _toggleSortDirection,
+                  tooltip: todoModel.sortAscending ? '切换为降序' : '切换为升序',
+                  onPressed: context.read<TodoModel>().toggleSortDirection,
                   icon: Icon(
-                    _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                    todoModel.sortAscending
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward,
                   ),
                 ),
               ],
@@ -790,7 +617,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
           ),
           // Expanded 让任务列表占满输入区域之外的剩余空间。
           Expanded(
-            child: _tasks.isEmpty
+            child: todoModel.tasks.isEmpty
                 // 空列表时用图标和提示文字引导用户添加第一条任务。
                 ? const Center(
                     child: Column(
@@ -828,8 +655,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                           GlobalKey.new,
                         ),
                         highlighted: _highlightedTaskId == task.id,
-                        onToggle: (isDone) => _toggleTask(task, isDone),
-                        onDelete: () => _deleteTask(task),
                         onEdit: () => _showEditTask(task),
                       );
                     },
@@ -840,8 +665,13 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
             selectedDueDate: _selectedDueDate,
             reminderEnabled: _selectedReminderEnabled,
             canEnableReminder: _canRemindAt(_selectedDueDate),
-            activeDeletedTaskCount: _activeDeletedTaskCount,
-            onAdd: _addTask,
+            onTaskAdded: () {
+              setState(() {
+                // 截止日期和提醒只属于本次新任务，添加后清空草稿。
+                _selectedDueDate = null;
+                _selectedReminderEnabled = false;
+              });
+            },
             onPickDueDate: _pickDueDateTime,
             onReminderChanged: _setSelectedReminder,
             onShowTrash: _showTrash,

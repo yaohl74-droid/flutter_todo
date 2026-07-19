@@ -96,13 +96,13 @@ class DeletedTask {
 - 回收站键：`deleted_tasks`，保存任务、删除时间和原始索引，超过 7 天自动清理
 - 排序偏好键：`task_sort_order`，值为 `added`、`dueDate` 或 `completion`
 - 升降序偏好键：`task_sort_ascending`，`true` 为升序，`false` 为降序
-- 启动读取：`TodoPage.initState()` 通过 `TaskStorage.load()` 异步读取
-- 自动写入：添加、编辑、切换完成状态、删除、回收站恢复和排序偏好变化后调用 `TaskStorage.save()`
+- 启动读取：`ChangeNotifierProvider` 创建 `TodoModel` 后调用 `load()` 异步读取
+- 自动写入：`TodoModel` 在添加、编辑、切换完成状态、删除、回收站恢复和排序偏好变化后调用 `TaskStorage.save()`
 - 首次运行：没有 `tasks` 存档时，把三条示例任务立即写入本地
 
-`TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入；页面 State 只消费 `load()` 返回的快照，并通过 `save()` 保存任务或排序偏好，不直接依赖存储实现。
+`TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入。`TodoModel extends ChangeNotifier` 持有任务列表、回收站和排序状态，调用存储层并在数据变化后执行 `notifyListeners()`；页面和任务组件通过 `context.watch` / `context.read` 展示与修改数据。
 
-排序只影响显示：代码在 `build` 使用 `List<Task>.of(_tasks)` 创建副本后排序，从不直接修改 `_tasks`。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
+排序只影响显示：`TodoModel.displayedTasks` 使用任务列表副本排序，从不直接修改原始列表。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
 ## 每日一句
 
@@ -113,8 +113,6 @@ class DeletedTask {
 - 最大自动重连次数：3 次。
 - 等待及重连期间可随时点击刷新，取消旧 Timer 并把计数清零。
 - 页面销毁时会取消 Timer 并关闭 `http.Client`，避免延迟回调访问已经销毁的 State，同时释放网络连接。
-
-`initState` 是 `State` 创建后只执行一次的初始化方法，因此适合启动读取。它本身不能声明为 `async`，所以实际异步工作放在单独方法中，并使用 `async/await` 等待读写完成。
 
 异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。回收站恢复操作也会先执行该检查。
 
@@ -208,6 +206,12 @@ flutter pub add http
 flutter pub add flutter_local_notifications timezone app_settings
 ```
 
+任务状态使用 `provider`：
+
+```bash
+flutter pub add provider
+```
+
 当前使用的主要依赖：
 
 ```yaml
@@ -220,6 +224,7 @@ dependencies:
   flutter_local_notifications: ^22.1.0
   timezone: ^0.11.1
   app_settings: ^7.0.0
+  provider: ^6.1.5+1
 ```
 
 ## 运行
@@ -296,7 +301,8 @@ flutter analyze
 lib/main.dart                    App 入口与 MyApp 根组件
 lib/models/task.dart             Task 数据模型与 JSON 转换
 lib/models/deleted_task.dart     回收站任务、删除时间与原始索引
-lib/pages/todo_page.dart         TodoPage 页面、交互与界面状态
+lib/models/todo_model.dart       Provider 任务状态、排序、回收站与持久化协调
+lib/pages/todo_page.dart         TodoPage、名言状态、日期交互与通知协调
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
 lib/services/task_notification_service.dart  通知权限、调度对账、64 条队列和点击载荷
@@ -317,4 +323,4 @@ windows/                         Windows 工程
 linux/                           Linux 工程
 ```
 
-当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后通过 `TaskStorage` 异步写入本地存储。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 都是 `StatelessWidget`，只接收页面传入的数据并通过回调上报刷新、勾选、删除、编辑、选日期和添加等事件，不持有业务状态。
+任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理，避免在这次重构中改变其他业务边界。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 继续保持为 `StatelessWidget`。

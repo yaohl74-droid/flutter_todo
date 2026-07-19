@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../models/todo_model.dart';
 import '../utils/date_format.dart';
 
-/// 底部录入区的纯展示组件；输入值、日期和提醒状态均由页面 State 持有。
+/// 底部录入区；任务写入 Provider，日期和提醒草稿仍由页面 State 持有。
 class TaskInputBar extends StatelessWidget {
   const TaskInputBar({
     super.key,
@@ -10,8 +12,7 @@ class TaskInputBar extends StatelessWidget {
     required this.selectedDueDate,
     required this.reminderEnabled,
     required this.canEnableReminder,
-    required this.activeDeletedTaskCount,
-    required this.onAdd,
+    required this.onTaskAdded,
     required this.onPickDueDate,
     required this.onReminderChanged,
     required this.onShowTrash,
@@ -21,8 +22,7 @@ class TaskInputBar extends StatelessWidget {
   final DateTime? selectedDueDate;
   final bool reminderEnabled;
   final bool canEnableReminder;
-  final int activeDeletedTaskCount;
-  final VoidCallback onAdd;
+  final VoidCallback onTaskAdded;
   final VoidCallback onPickDueDate;
   final ValueChanged<bool> onReminderChanged;
   final VoidCallback onShowTrash;
@@ -31,8 +31,27 @@ class TaskInputBar extends StatelessWidget {
       selectedDueDate != null &&
       !selectedDueDate!.isAfter(DateTime.now().toUtc());
 
+  Future<void> _addTask(BuildContext context) async {
+    final bool added = await context.read<TodoModel>().addTask(
+      title: controller.text,
+      dueDate: selectedDueDate,
+      reminderEnabled: reminderEnabled,
+    );
+    if (!added || !context.mounted) {
+      return;
+    }
+    controller.clear();
+    onTaskAdded();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已添加')));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final int activeDeletedTaskCount = context
+        .watch<TodoModel>()
+        .activeDeletedTaskCount;
     return SafeArea(
       top: false,
       child: Padding(
@@ -46,7 +65,7 @@ class TaskInputBar extends StatelessWidget {
                   child: TextField(
                     controller: controller,
                     textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => onAdd(),
+                    onSubmitted: (_) => _addTask(context),
                     decoration: const InputDecoration(
                       hintText: '请输入任务',
                       filled: true,
@@ -65,7 +84,10 @@ class TaskInputBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(onPressed: onAdd, child: const Text('添加')),
+                ElevatedButton(
+                  onPressed: () => _addTask(context),
+                  child: const Text('添加'),
+                ),
               ],
             ),
             const SizedBox(height: 6),

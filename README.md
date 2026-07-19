@@ -297,6 +297,9 @@ lib/pages/todo_page.dart         TodoPage 页面、交互与界面状态
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
 lib/services/task_notification_service.dart  通知权限、调度对账、64 条队列和点击载荷
+lib/widgets/quote_card.dart      每日一句 FutureBuilder、状态展示与刷新入口
+lib/widgets/task_tile.dart       单条任务的滑动删除、卡片、勾选与编辑入口
+lib/widgets/task_input_bar.dart  底部输入框、日期、提醒、回收站与添加入口
 test/widget_test.dart            Widget、持久化、兼容与重连状态机测试
 test/quote_service_test.dart     名言响应解析、超时和网络异常测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
@@ -309,4 +312,4 @@ windows/                         Windows 工程
 linux/                           Linux 工程
 ```
 
-当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后通过 `TaskStorage` 异步写入本地存储。
+当前页面状态由 `StatefulWidget` 和 `setState` 管理。所有会影响界面的任务变更都在 `setState` 中完成，随后通过 `TaskStorage` 异步写入本地存储。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 都是 `StatelessWidget`，只接收页面传入的数据并通过回调上报刷新、勾选、删除、编辑、选日期和添加等事件，不持有业务状态。

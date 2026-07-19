@@ -7,10 +7,11 @@ import '../models/task.dart';
 import '../services/quote_service.dart';
 import '../services/task_notification_service.dart';
 import '../services/task_storage.dart';
+import '../widgets/quote_card.dart';
+import '../widgets/task_input_bar.dart';
+import '../widgets/task_tile.dart';
 
 enum TaskSortOrder { added, dueDate, completion }
-
-enum QuoteLoadStage { idle, loading, retrying, failed }
 
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
@@ -674,74 +675,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     _startQuoteRequest(stage: QuoteLoadStage.loading, notify: true);
   }
 
-  Widget _buildQuoteCard() {
-    return Card(
-      key: const ValueKey<String>('daily-quote-card'),
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Expanded(
-              child: FutureBuilder<Quote>(
-                future: _quoteFuture,
-                builder: (context, snapshot) {
-                  if (_quoteStage == QuoteLoadStage.retrying) {
-                    return const Text('正在联网获取名言,请稍等');
-                  }
-
-                  // FutureBuilder 的三种状态：waiting 表示加载中；hasError
-                  // 表示本次请求失败；hasData 表示请求成功并可安全展示名言。
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError ||
-                      _quoteStage == QuoteLoadStage.failed) {
-                    final String message = _quoteStage == QuoteLoadStage.failed
-                        ? '无法连接,无法显示名言'
-                        : '获取名言失败';
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(message),
-                        TextButton(
-                          onPressed: _refreshQuote,
-                          child: const Text('重试'),
-                        ),
-                      ],
-                    );
-                  }
-                  if (snapshot.hasData) {
-                    final Quote quote = snapshot.data!;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('“${quote.content}”'),
-                        const SizedBox(height: 6),
-                        Text(
-                          '—— ${quote.author}',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
-                    );
-                  }
-
-                  return const Text('暂无名言');
-                },
-              ),
-            ),
-            IconButton(
-              key: const ValueKey<String>('refresh-quote-button'),
-              tooltip: '刷新名言',
-              onPressed: _refreshQuote,
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   String _formatDateTime(DateTime date) {
     final DateTime localDate = date.toLocal();
     final String month = localDate.month.toString().padLeft(2, '0');
@@ -749,32 +682,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     final String hour = localDate.hour.toString().padLeft(2, '0');
     final String minute = localDate.minute.toString().padLeft(2, '0');
     return '${localDate.year}-$month-$day $hour:$minute';
-  }
-
-  bool _isOverdue(Task task) {
-    if (task.isDone || task.dueDate == null) {
-      return false;
-    }
-
-    final DateTime localDueDate = task.dueDate!.toLocal();
-    final DateTime dueMinute = DateTime(
-      localDueDate.year,
-      localDueDate.month,
-      localDueDate.day,
-      localDueDate.hour,
-      localDueDate.minute,
-    );
-    final DateTime now = DateTime.now();
-    final DateTime currentMinute = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      now.hour,
-      now.minute,
-    );
-
-    // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
-    return dueMinute.isBefore(currentMinute);
   }
 
   int get _activeDeletedTaskCount {
@@ -844,7 +751,11 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          _buildQuoteCard(),
+          QuoteCard(
+            quoteFuture: _quoteFuture,
+            stage: _quoteStage,
+            onRefresh: _refreshQuote,
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
             child: Row(
@@ -918,221 +829,30 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                     itemBuilder: (context, index) {
                       final Task task = displayedTasks[index];
 
-                      // Dismissible 依靠 key 区分列表项并跟踪滑动动画；如果 key
-                      // 重复，Flutter 可能删除或复用错误的任务，所以必须使用唯一 ID。
-                      return Dismissible(
-                        key: ValueKey<String>(task.id),
-                        direction: DismissDirection.endToStart,
-                        onDismissed: (_) => _deleteTask(task),
-                        background: Container(
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 24),
-                          decoration: BoxDecoration(
-                            color: Colors.red.shade400,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: const Icon(
-                            Icons.delete,
-                            color: Colors.white,
-                            size: 30,
-                          ),
+                      return TaskTile(
+                        task: task,
+                        contentKey: _taskKeys.putIfAbsent(
+                          task.id,
+                          GlobalKey.new,
                         ),
-                        // 通知进入 App 后定位到对应任务，并用短暂底色提示用户。
-                        child: AnimatedContainer(
-                          key: _taskKeys.putIfAbsent(task.id, GlobalKey.new),
-                          duration: const Duration(milliseconds: 250),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            border: _highlightedTaskId == task.id
-                                ? Border.all(
-                                    color: Colors.amber.shade700,
-                                    width: 2,
-                                  )
-                                : null,
-                          ),
-                          // Card 的圆角和轻微阴影让每条任务层次更清晰。
-                          child: Card(
-                            margin: EdgeInsets.zero,
-                            color: _highlightedTaskId == task.id
-                                ? const Color(0xFFFFF4C2)
-                                : null,
-                            elevation: 2,
-                            shadowColor: Colors.black26,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: ListTile(
-                              onTap: () => _showEditTask(task),
-                              leading: Checkbox(
-                                value: task.isDone,
-                                onChanged: (isDone) =>
-                                    _toggleTask(task, isDone),
-                              ),
-                              title: Text(
-                                task.title,
-                                style: TextStyle(
-                                  decoration: task.isDone
-                                      ? TextDecoration.lineThrough
-                                      : TextDecoration.none,
-                                  color: task.isDone ? Colors.grey : null,
-                                ),
-                              ),
-                              subtitle: task.dueDate == null
-                                  ? null
-                                  : Text(
-                                      '截止日期：${_formatDateTime(task.dueDate!)}',
-                                      style: TextStyle(
-                                        color: _isOverdue(task)
-                                            ? Colors.red
-                                            : Colors.grey.shade600,
-                                      ),
-                                    ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (task.reminderEnabled && !task.isDone)
-                                    const Tooltip(
-                                      message: '已开启到期提醒',
-                                      child: Icon(
-                                        Icons.notifications_active_outlined,
-                                        size: 20,
-                                        color: Color(0xFF4F8A5B),
-                                      ),
-                                    ),
-                                  IconButton(
-                                    tooltip: '删除任务',
-                                    onPressed: () => _deleteTask(task),
-                                    icon: const Icon(Icons.delete_outline),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
+                        highlighted: _highlightedTaskId == task.id,
+                        onToggle: (isDone) => _toggleTask(task, isDone),
+                        onDelete: () => _deleteTask(task),
+                        onEdit: () => _showEditTask(task),
                       );
                     },
                   ),
           ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _taskController,
-                          textInputAction: TextInputAction.done,
-                          // onSubmitted 让软键盘的“完成/回车”与添加按钮作用相同。
-                          onSubmitted: (_) => _addTask(),
-                          decoration: const InputDecoration(
-                            hintText: '请输入任务',
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(14),
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(14),
-                              ),
-                              borderSide: BorderSide(
-                                color: Color(0xFF4F8A5B),
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _addTask,
-                        child: const Text('添加'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          IconButton(
-                            key: const ValueKey<String>('trash-button'),
-                            tooltip: '回收站',
-                            onPressed: _showTrash,
-                            icon: const Icon(Icons.delete_sweep_outlined),
-                          ),
-                          if (_activeDeletedTaskCount > 0)
-                            Positioned(
-                              right: 0,
-                              top: 0,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade400,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Text(
-                                  '$_activeDeletedTaskCount',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      IconButton(
-                        key: const ValueKey<String>('due-date-button'),
-                        tooltip: '选择截止日期和时间',
-                        onPressed: _pickDueDateTime,
-                        icon: const Icon(Icons.calendar_month),
-                      ),
-                      Expanded(
-                        child: Text(
-                          _selectedDueDate == null
-                              ? '未设置截止时间'
-                              : _formatDateTime(_selectedDueDate!),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFF4F6F56),
-                          ),
-                        ),
-                      ),
-                      const Text('到期提醒'),
-                      Switch(
-                        key: const ValueKey<String>('new-reminder-switch'),
-                        value:
-                            _selectedReminderEnabled &&
-                            _canRemindAt(_selectedDueDate),
-                        onChanged: _canRemindAt(_selectedDueDate)
-                            ? _setSelectedReminder
-                            : null,
-                      ),
-                    ],
-                  ),
-                  if (_selectedDueDate != null &&
-                      !_selectedDueDate!.isAfter(DateTime.now().toUtc()))
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        '截止时间已过，无法设置提醒',
-                        style: TextStyle(fontSize: 11, color: Colors.red),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+          TaskInputBar(
+            controller: _taskController,
+            selectedDueDate: _selectedDueDate,
+            reminderEnabled: _selectedReminderEnabled,
+            canEnableReminder: _canRemindAt(_selectedDueDate),
+            activeDeletedTaskCount: _activeDeletedTaskCount,
+            onAdd: _addTask,
+            onPickDueDate: _pickDueDateTime,
+            onReminderChanged: _setSelectedReminder,
+            onShowTrash: _showTrash,
           ),
         ],
       ),

@@ -74,6 +74,8 @@ class Task {
   }
 }
 
+enum TaskSortOrder { added, dueDate, completion }
+
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
@@ -85,6 +87,8 @@ class TodoPage extends StatefulWidget {
 
 class _TodoPageState extends State<TodoPage> {
   static const String _tasksStorageKey = 'tasks';
+  static const String _sortOrderStorageKey = 'task_sort_order';
+  static const String _sortAscendingStorageKey = 'task_sort_ascending';
 
   final List<Task> _tasks = [
     Task(title: '买菜'),
@@ -93,6 +97,8 @@ class _TodoPageState extends State<TodoPage> {
   ];
   final TextEditingController _taskController = TextEditingController();
   DateTime? _selectedDueDate;
+  TaskSortOrder _sortOrder = TaskSortOrder.dueDate;
+  bool _sortAscending = true;
 
   @override
   void initState() {
@@ -106,7 +112,21 @@ class _TodoPageState extends State<TodoPage> {
     // 本地存储读写需要时间并返回 Future，因此用 async/await 等待结果，
     // 避免在数据尚未读取完成时就继续处理它。
     final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final String? savedSortOrder = preferences.getString(_sortOrderStorageKey);
+    final TaskSortOrder restoredSortOrder = TaskSortOrder.values.firstWhere(
+      (order) => order.name == savedSortOrder,
+      orElse: () => TaskSortOrder.dueDate,
+    );
+    final bool restoredSortAscending =
+        preferences.getBool(_sortAscendingStorageKey) ?? true;
     final String? tasksJson = preferences.getString(_tasksStorageKey);
+
+    if (mounted) {
+      setState(() {
+        _sortOrder = restoredSortOrder;
+        _sortAscending = restoredSortAscending;
+      });
+    }
 
     // 没有存档说明是首次启动：显示示例任务，并立刻保存到用户设备。
     if (tasksJson == null) {
@@ -194,6 +214,22 @@ class _TodoPageState extends State<TodoPage> {
     await preferences.setString(_tasksStorageKey, tasksJson);
   }
 
+  Future<void> _setSortOrder(TaskSortOrder order) async {
+    setState(() {
+      _sortOrder = order;
+    });
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_sortOrderStorageKey, order.name);
+  }
+
+  Future<void> _toggleSortDirection() async {
+    setState(() {
+      _sortAscending = !_sortAscending;
+    });
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_sortAscendingStorageKey, _sortAscending);
+  }
+
   Future<void> _addTask() async {
     final String task = _taskController.text.trim();
 
@@ -222,7 +258,7 @@ class _TodoPageState extends State<TodoPage> {
     ).showSnackBar(const SnackBar(content: Text('已添加')));
   }
 
-  Future<void> _pickDueDate() async {
+  Future<void> _pickDueDateTime() async {
     final DateTime now = DateTime.now();
     final DateTime today = DateTime(now.year, now.month, now.day);
     final DateTime firstDate = DateTime(today.year - 100);
@@ -242,8 +278,18 @@ class _TodoPageState extends State<TodoPage> {
       lastDate: lastDate,
     );
 
-    // 日期选择器关闭时页面可能已销毁，更新 State 前必须检查 mounted。
+    // 日期选择器关闭时页面可能已销毁，打开下一个控件前必须检查 mounted。
     if (!mounted || pickedDate == null) {
+      return;
+    }
+
+    // Flutter 将日期和时间拆成两个原生控件；第二步选择小时和分钟。
+    final TimeOfDay? pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_selectedDueDate ?? now),
+    );
+
+    if (!mounted || pickedTime == null) {
       return;
     }
 
@@ -252,6 +298,8 @@ class _TodoPageState extends State<TodoPage> {
         pickedDate.year,
         pickedDate.month,
         pickedDate.day,
+        pickedTime.hour,
+        pickedTime.minute,
       );
     });
   }
@@ -323,11 +371,13 @@ class _TodoPageState extends State<TodoPage> {
     super.dispose();
   }
 
-  String _formatDate(DateTime date) {
+  String _formatDateTime(DateTime date) {
     final DateTime localDate = date.toLocal();
     final String month = localDate.month.toString().padLeft(2, '0');
     final String day = localDate.day.toString().padLeft(2, '0');
-    return '${localDate.year}-$month-$day';
+    final String hour = localDate.hour.toString().padLeft(2, '0');
+    final String minute = localDate.minute.toString().padLeft(2, '0');
+    return '${localDate.year}-$month-$day $hour:$minute';
   }
 
   bool _isOverdue(Task task) {
@@ -335,23 +385,78 @@ class _TodoPageState extends State<TodoPage> {
       return false;
     }
 
-    final DateTime now = DateTime.now();
-    final DateTime today = DateTime(now.year, now.month, now.day);
     final DateTime localDueDate = task.dueDate!.toLocal();
-    final DateTime dueDay = DateTime(
+    final DateTime dueMinute = DateTime(
       localDueDate.year,
       localDueDate.month,
       localDueDate.day,
+      localDueDate.hour,
+      localDueDate.minute,
+    );
+    final DateTime now = DateTime.now();
+    final DateTime currentMinute = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
     );
 
-    // 只比较年月日，今天到期不算过期，早于今天且未完成才标红。
-    return dueDay.isBefore(today);
+    // 精确到分钟比较；当前分钟内不算过期，进入下一分钟后才标红。
+    return dueMinute.isBefore(currentMinute);
+  }
+
+  String get _sortOrderLabel {
+    return switch (_sortOrder) {
+      TaskSortOrder.added => '按添加顺序',
+      TaskSortOrder.dueDate => '按截止日期',
+      TaskSortOrder.completion => '按完成状态',
+    };
+  }
+
+  List<Task> get _displayedTasks {
+    final List<Task> displayedTasks = List<Task>.of(_tasks);
+    final Map<Task, int> originalIndexes = {
+      for (int index = 0; index < _tasks.length; index++) _tasks[index]: index,
+    };
+
+    displayedTasks.sort((first, second) {
+      int comparison;
+      switch (_sortOrder) {
+        case TaskSortOrder.added:
+          comparison = originalIndexes[first]!.compareTo(
+            originalIndexes[second]!,
+          );
+          break;
+        case TaskSortOrder.dueDate:
+          if (first.dueDate == null && second.dueDate == null) {
+            comparison = 0;
+          } else if (first.dueDate == null) {
+            return 1;
+          } else if (second.dueDate == null) {
+            return -1;
+          } else {
+            comparison = first.dueDate!.compareTo(second.dueDate!);
+          }
+          break;
+        case TaskSortOrder.completion:
+          comparison = (first.isDone ? 1 : 0).compareTo(second.isDone ? 1 : 0);
+          break;
+      }
+
+      if (comparison != 0) {
+        return _sortAscending ? comparison : -comparison;
+      }
+      return originalIndexes[first]!.compareTo(originalIndexes[second]!);
+    });
+    return displayedTasks;
   }
 
   @override
   Widget build(BuildContext context) {
     // 每次状态变化重新 build 时统计，标题会立即反映最新完成进度。
     final int completedCount = _tasks.where((task) => task.isDone).length;
+    final List<Task> displayedTasks = _displayedTasks;
 
     // Scaffold 是 Material Design 页面结构，提供 AppBar、主体等常用区域。
     return Scaffold(
@@ -361,6 +466,46 @@ class _TodoPageState extends State<TodoPage> {
       ),
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '排序：$_sortOrderLabel（${_sortAscending ? '升序' : '降序'}）',
+                    style: const TextStyle(color: Color(0xFF4F6F56)),
+                  ),
+                ),
+                PopupMenuButton<TaskSortOrder>(
+                  initialValue: _sortOrder,
+                  tooltip: '选择排序方式',
+                  onSelected: _setSortOrder,
+                  itemBuilder: (context) => TaskSortOrder.values
+                      .map(
+                        (order) => CheckedPopupMenuItem<TaskSortOrder>(
+                          value: order,
+                          checked: order == _sortOrder,
+                          child: Text(switch (order) {
+                            TaskSortOrder.added => '按添加顺序',
+                            TaskSortOrder.dueDate => '按截止日期',
+                            TaskSortOrder.completion => '按完成状态',
+                          }),
+                        ),
+                      )
+                      .toList(),
+                  icon: const Icon(Icons.sort),
+                ),
+                IconButton(
+                  key: const ValueKey<String>('sort-direction-button'),
+                  tooltip: _sortAscending ? '切换为降序' : '切换为升序',
+                  onPressed: _toggleSortDirection,
+                  icon: Icon(
+                    _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                  ),
+                ),
+              ],
+            ),
+          ),
           // Expanded 让任务列表占满输入区域之外的剩余空间。
           Expanded(
             child: _tasks.isEmpty
@@ -388,11 +533,11 @@ class _TodoPageState extends State<TodoPage> {
                 // ListView.separated 统一控制卡片之间的留白。
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    itemCount: _tasks.length,
+                    itemCount: displayedTasks.length,
                     separatorBuilder: (context, index) =>
                         const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final Task task = _tasks[index];
+                      final Task task = displayedTasks[index];
 
                       // Dismissible 依靠 key 区分列表项并跟踪滑动动画；如果 key
                       // 重复，Flutter 可能删除或复用错误的任务，所以必须使用唯一 ID。
@@ -438,7 +583,7 @@ class _TodoPageState extends State<TodoPage> {
                             subtitle: task.dueDate == null
                                 ? null
                                 : Text(
-                                    '截止日期：${_formatDate(task.dueDate!)}',
+                                    '截止日期：${_formatDateTime(task.dueDate!)}',
                                     style: TextStyle(
                                       color: _isOverdue(task)
                                           ? Colors.red
@@ -487,19 +632,19 @@ class _TodoPageState extends State<TodoPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // 日历按钮打开日期选择器，选中后在输入框旁显示日期。
+                  // 日历按钮依次选择日期和时间，选中后在输入框旁显示到分钟。
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         key: const ValueKey<String>('due-date-button'),
-                        tooltip: '选择截止日期',
-                        onPressed: _pickDueDate,
+                        tooltip: '选择截止日期和时间',
+                        onPressed: _pickDueDateTime,
                         icon: const Icon(Icons.calendar_month),
                       ),
                       if (_selectedDueDate != null)
                         Text(
-                          _formatDate(_selectedDueDate!),
+                          _formatDateTime(_selectedDueDate!),
                           style: const TextStyle(
                             fontSize: 11,
                             color: Color(0xFF4F6F56),

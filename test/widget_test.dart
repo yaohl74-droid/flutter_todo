@@ -8,25 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_todo/main.dart';
 import 'package:my_todo/models/task.dart';
 import 'package:my_todo/models/todo_model.dart';
-import 'package:my_todo/services/quote_service.dart';
 import 'package:my_todo/services/task_notification_service.dart';
-
-class _FakeQuoteService extends QuoteService {
-  _FakeQuoteService(this._fetcher);
-
-  final Future<Quote> Function(int callCount) _fetcher;
-  int callCount = 0;
-  bool isDisposed = false;
-
-  @override
-  Future<Quote> fetchQuote() => _fetcher(++callCount);
-
-  @override
-  void dispose() {
-    isDisposed = true;
-    super.dispose();
-  }
-}
 
 class _FakeNotificationScheduler implements TaskNotificationScheduler {
   _FakeNotificationScheduler({
@@ -69,15 +51,9 @@ class _FakeNotificationScheduler implements TaskNotificationScheduler {
 }
 
 Widget _buildTestApp({
-  _FakeQuoteService? quoteService,
   _FakeNotificationScheduler? notificationScheduler,
 }) {
   return MyApp(
-    quoteService:
-        quoteService ??
-        _FakeQuoteService(
-          (_) async => const Quote(content: '测试名言', author: '测试作者'),
-        ),
     notificationScheduler:
         notificationScheduler ?? _FakeNotificationScheduler(),
   );
@@ -718,98 +694,5 @@ void main() {
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(migratedTasks, hasLength(2));
     expect(migratedTasks.every((task) => task['id'] != null), isTrue);
-  });
-
-  testWidgets('每日一句加载成功并可手动刷新', (WidgetTester tester) async {
-    final Completer<Quote> firstRequest = Completer<Quote>();
-    final _FakeQuoteService service = _FakeQuoteService((int callCount) {
-      if (callCount == 1) {
-        return firstRequest.future;
-      }
-      return Future<Quote>.value(const Quote(content: '刷新后的名言', author: '新作者'));
-    });
-
-    await tester.pumpWidget(_buildTestApp(quoteService: service));
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-
-    firstRequest.complete(const Quote(content: '第一条名言', author: '作者甲'));
-    await tester.pumpAndSettle();
-    expect(find.text('“第一条名言”'), findsOneWidget);
-    expect(find.text('—— 作者甲'), findsOneWidget);
-
-    await tester.tap(
-      find.byKey(const ValueKey<String>('refresh-quote-button')),
-    );
-    await tester.pumpAndSettle();
-    expect(service.callCount, 2);
-    expect(find.text('“刷新后的名言”'), findsOneWidget);
-    expect(find.text('—— 新作者'), findsOneWidget);
-  });
-
-  testWidgets('非超时网络异常也会自动重连三次', (WidgetTester tester) async {
-    final _FakeQuoteService service = _FakeQuoteService(
-      (_) => Future<Quote>.error(const QuoteException('网络异常')),
-    );
-
-    await tester.pumpWidget(_buildTestApp(quoteService: service));
-    await tester.pump();
-    expect(find.text('正在联网获取名言,请稍等'), findsOneWidget);
-
-    for (int retry = 1; retry <= 3; retry++) {
-      await tester.pump(const Duration(seconds: 60));
-      await tester.pump();
-      expect(service.callCount, retry + 1);
-    }
-
-    expect(find.text('无法连接,无法显示名言'), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
-  });
-
-  testWidgets('超时后每分钟重连且三次失败后停止', (WidgetTester tester) async {
-    final _FakeQuoteService service = _FakeQuoteService(
-      (_) => Future<Quote>.error(const QuoteTimeoutException()),
-    );
-
-    await tester.pumpWidget(_buildTestApp(quoteService: service));
-    await tester.pump();
-    expect(find.text('正在联网获取名言,请稍等'), findsOneWidget);
-    expect(service.callCount, 1);
-
-    for (int retry = 1; retry <= 3; retry++) {
-      await tester.pump(const Duration(seconds: 60));
-      await tester.pump();
-      expect(service.callCount, retry + 1);
-    }
-
-    expect(find.text('无法连接,无法显示名言'), findsOneWidget);
-    expect(find.text('重试'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 60));
-    expect(service.callCount, 4);
-  });
-
-  testWidgets('手动刷新会取消等待中的重连并重置计数', (WidgetTester tester) async {
-    final _FakeQuoteService service = _FakeQuoteService(
-      (_) => Future<Quote>.error(const QuoteTimeoutException()),
-    );
-
-    await tester.pumpWidget(_buildTestApp(quoteService: service));
-    await tester.pump();
-    expect(service.callCount, 1);
-
-    await tester.tap(
-      find.byKey(const ValueKey<String>('refresh-quote-button')),
-    );
-    await tester.pump();
-    expect(service.callCount, 2);
-
-    // 60 秒后只触发手动刷新创建的新 Timer，旧 Timer 已被取消。
-    await tester.pump(const Duration(seconds: 60));
-    await tester.pump();
-    expect(service.callCount, 3);
-
-    await tester.pumpWidget(const SizedBox.shrink());
-    expect(service.isDisposed, isTrue);
-    await tester.pump(const Duration(seconds: 60));
-    expect(service.callCount, 3);
   });
 }

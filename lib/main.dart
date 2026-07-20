@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'models/quote_model.dart';
 import 'models/todo_model.dart';
 import 'pages/todo_page.dart';
-import 'services/quote_service.dart';
 import 'services/reminder_service.dart';
 import 'services/task_notification_service.dart';
 
@@ -14,12 +14,10 @@ void main() {
 class MyApp extends StatelessWidget {
   const MyApp({
     super.key,
-    this.quoteService,
     this.notificationScheduler,
     this.todoModel,
   });
 
-  final QuoteService? quoteService;
   final TaskNotificationScheduler? notificationScheduler;
   final TodoModel? todoModel;
 
@@ -29,6 +27,9 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<TodoModel>(
           create: (_) => (todoModel ?? TodoModel())..load(),
+        ),
+        ChangeNotifierProvider<QuoteModel>(
+          create: (_) => QuoteModel()..refresh(),
         ),
         Provider<ReminderService>(
           create: (context) => ReminderService(
@@ -51,7 +52,7 @@ class MyApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: TodoPage(quoteService: quoteService),
+        home: const TodoPage(),
       ),
     );
   }

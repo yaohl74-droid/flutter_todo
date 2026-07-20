@@ -1,24 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../models/quote_model.dart';
 import '../services/quote_service.dart';
 
-enum QuoteLoadStage { idle, loading, retrying, failed }
-
-/// 每日一句的纯展示组件；请求、重试计时和阶段切换仍由页面 State 管理。
+/// 每日一句的展示组件。
+///
+/// 通过 Provider 使用 QuoteModel 管理的 quoteFuture 和 stage，
+/// 刷新时调用 QuoteModel.refresh()。
 class QuoteCard extends StatelessWidget {
-  const QuoteCard({
-    super.key,
-    required this.quoteFuture,
-    required this.stage,
-    required this.onRefresh,
-  });
-
-  final Future<Quote> quoteFuture;
-  final QuoteLoadStage stage;
-  final VoidCallback onRefresh;
+  const QuoteCard({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final QuoteModel model = context.watch<QuoteModel>();
+
     return Card(
       key: const ValueKey<String>('daily-quote-card'),
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
@@ -28,9 +24,9 @@ class QuoteCard extends StatelessWidget {
           children: [
             Expanded(
               child: FutureBuilder<Quote>(
-                future: quoteFuture,
+                future: model.quoteFuture,
                 builder: (context, snapshot) {
-                  if (stage == QuoteLoadStage.retrying) {
+                  if (model.stage == QuoteLoadStage.retrying) {
                     return const Text('正在联网获取名言,请稍等');
                   }
 
@@ -39,8 +35,9 @@ class QuoteCard extends StatelessWidget {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  if (snapshot.hasError || stage == QuoteLoadStage.failed) {
-                    final String message = stage == QuoteLoadStage.failed
+                  if (snapshot.hasError ||
+                      model.stage == QuoteLoadStage.failed) {
+                    final String message = model.stage == QuoteLoadStage.failed
                         ? '无法连接,无法显示名言'
                         : '获取名言失败';
                     return Column(
@@ -48,7 +45,7 @@ class QuoteCard extends StatelessWidget {
                       children: [
                         Text(message),
                         TextButton(
-                          onPressed: onRefresh,
+                          onPressed: model.refresh,
                           child: const Text('重试'),
                         ),
                       ],
@@ -59,7 +56,7 @@ class QuoteCard extends StatelessWidget {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('“${quote.content}”'),
+                        Text('"${quote.content}"'),
                         const SizedBox(height: 6),
                         Text(
                           '—— ${quote.author}',
@@ -76,7 +73,7 @@ class QuoteCard extends StatelessWidget {
             IconButton(
               key: const ValueKey<String>('refresh-quote-button'),
               tooltip: '刷新名言',
-              onPressed: onRefresh,
+              onPressed: model.refresh,
               icon: const Icon(Icons.refresh),
             ),
           ],

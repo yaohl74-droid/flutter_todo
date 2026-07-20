@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../models/deleted_task.dart';
 import '../models/task.dart';
 import '../models/todo_model.dart';
-import '../services/quote_service.dart';
 import '../services/reminder_service.dart';
 import '../utils/date_format.dart';
 import '../widgets/quote_card.dart';
@@ -16,27 +15,16 @@ import '../widgets/task_tile.dart';
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key, this.quoteService});
-
-  final QuoteService? quoteService;
+  const TodoPage({super.key});
 
   @override
   State<TodoPage> createState() => _TodoPageState();
 }
 
 class _TodoPageState extends State<TodoPage> {
-  static const int _maxQuoteRetries = 3;
-  static const Duration _quoteRetryDelay = Duration(seconds: 60);
-
   final TextEditingController _taskController = TextEditingController();
   DateTime? _selectedDueDate;
   bool _selectedReminderEnabled = false;
-  late final QuoteService _quoteService;
-  late Future<Quote> _quoteFuture;
-  QuoteLoadStage _quoteStage = QuoteLoadStage.idle;
-  Timer? _quoteRetryTimer;
-  int _quoteRetryCount = 0;
-  int _quoteRequestId = 0;
   late ReminderService _reminderService;
   final Map<String, GlobalKey> _taskKeys = <String, GlobalKey>{};
   Timer? _highlightTimer;
@@ -49,8 +37,6 @@ class _TodoPageState extends State<TodoPage> {
   @override
   void initState() {
     super.initState();
-    _quoteService = widget.quoteService ?? QuoteService();
-    _startQuoteRequest(stage: QuoteLoadStage.loading, notify: false);
   }
 
   @override
@@ -473,79 +459,9 @@ class _TodoPageState extends State<TodoPage> {
   void dispose() {
     _todoModel?.removeListener(_handleTodoModelChanged);
     _highlightTimer?.cancel();
-    // 页面销毁后必须取消等待中的重连，避免 Timer 回调对已销毁页面 setState。
-    _quoteRetryTimer?.cancel();
-    _quoteService.dispose();
     // 页面销毁时释放输入控制器，避免占用不再需要的资源。
     _taskController.dispose();
     super.dispose();
-  }
-
-  void _startQuoteRequest({
-    required QuoteLoadStage stage,
-    required bool notify,
-  }) {
-    final int requestId = ++_quoteRequestId;
-    final Future<Quote> request = _quoteService.fetchQuote();
-
-    void updateRequest() {
-      _quoteStage = stage;
-      _quoteFuture = request;
-    }
-
-    if (notify) {
-      setState(updateRequest);
-    } else {
-      updateRequest();
-    }
-
-    // FutureBuilder 只展示这一次请求；超时后的定时重连由 State 统一调度。
-    request.then<void>(
-      (_) {
-        if (!mounted || requestId != _quoteRequestId) {
-          return;
-        }
-        _quoteRetryTimer?.cancel();
-        setState(() {
-          _quoteRetryCount = 0;
-          _quoteStage = QuoteLoadStage.idle;
-        });
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        if (!mounted || requestId != _quoteRequestId) {
-          return;
-        }
-        // 超时、断网、DNS 和 TLS 等请求失败都统一按 QuoteException 重连。
-        if (error is QuoteException && _quoteRetryCount < _maxQuoteRetries) {
-          _scheduleQuoteRetry();
-          return;
-        }
-        setState(() {
-          _quoteStage = QuoteLoadStage.failed;
-        });
-      },
-    );
-  }
-
-  void _scheduleQuoteRetry() {
-    _quoteRetryTimer?.cancel();
-    setState(() {
-      _quoteStage = QuoteLoadStage.retrying;
-    });
-    _quoteRetryTimer = Timer(_quoteRetryDelay, () {
-      if (!mounted) {
-        return;
-      }
-      _quoteRetryCount++;
-      _startQuoteRequest(stage: QuoteLoadStage.retrying, notify: true);
-    });
-  }
-
-  void _refreshQuote() {
-    // 手动刷新代表一轮全新尝试：取消旧 Timer，并重置自动重连次数。
-    _quoteRetryTimer?.cancel();
-    _quoteRetryCount = 0;
-    _startQuoteRequest(stage: QuoteLoadStage.loading, notify: true);
   }
 
   @override
@@ -564,11 +480,7 @@ class _TodoPageState extends State<TodoPage> {
       ),
       body: Column(
         children: [
-          QuoteCard(
-            quoteFuture: _quoteFuture,
-            stage: _quoteStage,
-            onRefresh: _refreshQuote,
-          ),
+          const QuoteCard(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
             child: Row(

@@ -2,18 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../models/task.dart';
 import '../models/todo_model.dart';
 import 'task_notification_service.dart';
 
 /// 监听任务变化并让系统提醒队列始终与当前任务状态一致。
 class ReminderService with WidgetsBindingObserver {
-  factory ReminderService({
+  ReminderService({
     required TodoModel todoModel,
     required TaskNotificationScheduler scheduler,
-  }) => ReminderService._(todoModel, scheduler);
-
-  ReminderService._(this._todoModel, this._scheduler)
-    : _lastTaskRevision = _todoModel.taskRevision {
+  })  : _todoModel = todoModel,
+        _scheduler = scheduler,
+        _lastTaskRevision = todoModel.taskRevision {
     _todoModel.addListener(_handleTodoModelChanged);
     WidgetsBinding.instance.addObserver(this);
   }
@@ -89,7 +89,20 @@ class ReminderService with WidgetsBindingObserver {
     try {
       while (_reconcileRequested && !_disposed) {
         _reconcileRequested = false;
-        await _scheduler.reconcile(List.of(_todoModel.tasks));
+        final List<Task> eligibleTasks = _todoModel.tasks
+            .where(
+              (task) =>
+                  task.reminderEnabled &&
+                  !task.isDone &&
+                  task.dueDate != null &&
+                  task.dueDate!.isAfter(DateTime.now()),
+            )
+            .toList();
+        try {
+          await _scheduler.reconcile(List.of(eligibleTasks));
+        } on Exception catch (_) {
+          // 对账失败不影响后续任务操作，下次恢复前台时会再次对账。
+        }
       }
     } finally {
       _reconcileFuture = null;

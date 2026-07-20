@@ -132,6 +132,7 @@ class DeletedTask {
 - App 在前台时也展示通知并播放默认提示音。
 - Android 清单注册开机广播接收器，设备重启或应用更新后由插件恢复待处理通知。
 - 调度和插件异常会被捕获，不影响任务保存；App 再次恢复前台时会重新对账。
+- 资格过滤（`reminderEnabled && !isDone && !expired`）由 `ReminderService` 在调用底层 `reconcile` 前完成，确保只有符合条件的任务进入系统通知队列。
 
 ### 旧数据兼容与迁移
 
@@ -280,6 +281,8 @@ flutter analyze
 - `Task` 分钟级过期规则，以及完成或无截止时间时不过期
 - 公共日期格式统一补零并显示到分钟
 - 提醒资格过滤、按到期时间排序以及 Apple 最近 64 条队列上限
+- `ReminderService` 资格过滤：只对已开启提醒、未完成且未过期的任务进行对账
+- `ReminderService` 对账错误处理：单个 `reconcile` 失败不中断循环，下次恢复前台时重新对账
 - `ReminderService` 在任务删除后重新对账、忽略未变化 revision，并在 dispose 后停止响应
 - 编辑任务名称、截止时间和提醒开关并持久化
 - 通知权限拒绝后回退关闭、系统设置跳转和通知点击任务高亮

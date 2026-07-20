@@ -74,6 +74,10 @@ void main() {
       todoModel: model,
       scheduler: scheduler,
     );
+    addTearDown(() {
+      service.dispose();
+      model.dispose();
+    });
     await service.initialize(onTaskSelected: (_) {});
     expect(scheduler.scheduledTaskIds, contains(task.id));
 
@@ -81,8 +85,6 @@ void main() {
     await _flushAsyncWork();
 
     expect(scheduler.scheduledTaskIds, isNot(contains(task.id)));
-    service.dispose();
-    model.dispose();
   });
 
   test('taskRevision 未变化时不重复对账', () async {
@@ -92,6 +94,10 @@ void main() {
       todoModel: model,
       scheduler: scheduler,
     );
+    addTearDown(() {
+      service.dispose();
+      model.dispose();
+    });
     await service.initialize(onTaskSelected: (_) {});
     final int reconcileCount = scheduler.reconcileCount;
 
@@ -99,8 +105,6 @@ void main() {
     await _flushAsyncWork();
 
     expect(scheduler.reconcileCount, reconcileCount);
-    service.dispose();
-    model.dispose();
   });
 
   test('dispose 后不再响应任务变化', () async {
@@ -113,6 +117,9 @@ void main() {
       todoModel: model,
       scheduler: scheduler,
     );
+    addTearDown(() {
+      model.dispose();
+    });
     await service.initialize(onTaskSelected: (_) {});
     final int reconcileCount = scheduler.reconcileCount;
     service.dispose();
@@ -121,6 +128,52 @@ void main() {
     await _flushAsyncWork();
 
     expect(scheduler.reconcileCount, reconcileCount);
-    model.dispose();
+  });
+
+  test('只对已开启提醒、未完成且未过期的任务进行对账', () async {
+    final Task eligibleTask = Task(
+      title: '应排程任务',
+      dueDate: DateTime.now().add(const Duration(hours: 1)),
+      reminderEnabled: true,
+    );
+    final Task disabledReminderTask = Task(
+      title: '未开提醒',
+      dueDate: DateTime.now().add(const Duration(hours: 1)),
+      reminderEnabled: false,
+    );
+    final Task doneTask = Task(
+      title: '已完成任务',
+      dueDate: DateTime.now().add(const Duration(hours: 1)),
+      reminderEnabled: true,
+      isDone: true,
+    );
+    final Task expiredTask = Task(
+      title: '已过期任务',
+      dueDate: DateTime.now().subtract(const Duration(hours: 1)),
+      reminderEnabled: true,
+    );
+    final List<Task> tasks = <Task>[
+      eligibleTask,
+      disabledReminderTask,
+      doneTask,
+      expiredTask,
+    ];
+    final TodoModel model = TodoModel(storage: _MemoryTaskStorage(tasks));
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler();
+    final ReminderService service = ReminderService(
+      todoModel: model,
+      scheduler: scheduler,
+    );
+    addTearDown(() {
+      service.dispose();
+      model.dispose();
+    });
+    await service.initialize(onTaskSelected: (_) {});
+
+    expect(
+      scheduler.scheduledTaskIds,
+      equals(<String>{eligibleTask.id}),
+      reason: '只有已开启提醒、未完成且未过期的任务应被排程',
+    );
   });
 }

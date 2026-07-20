@@ -7,7 +7,7 @@ import '../models/deleted_task.dart';
 import '../models/task.dart';
 import '../models/todo_model.dart';
 import '../services/quote_service.dart';
-import '../services/task_notification_service.dart';
+import '../services/reminder_service.dart';
 import '../utils/date_format.dart';
 import '../widgets/quote_card.dart';
 import '../widgets/task_input_bar.dart';
@@ -16,16 +16,15 @@ import '../widgets/task_tile.dart';
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key, this.quoteService, this.notificationScheduler});
+  const TodoPage({super.key, this.quoteService});
 
   final QuoteService? quoteService;
-  final TaskNotificationScheduler? notificationScheduler;
 
   @override
   State<TodoPage> createState() => _TodoPageState();
 }
 
-class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
+class _TodoPageState extends State<TodoPage> {
   static const int _maxQuoteRetries = 3;
   static const Duration _quoteRetryDelay = Duration(seconds: 60);
 
@@ -38,24 +37,19 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   Timer? _quoteRetryTimer;
   int _quoteRetryCount = 0;
   int _quoteRequestId = 0;
-  late final TaskNotificationScheduler _notificationScheduler;
+  late ReminderService _reminderService;
   final Map<String, GlobalKey> _taskKeys = <String, GlobalKey>{};
   Timer? _highlightTimer;
   String? _highlightedTaskId;
   String? _pendingTaskSelection;
   TodoModel? _todoModel;
-  int _lastReminderRevision = 0;
   int _lastPersistenceFailureRevision = 0;
-  bool _didInitializeTasksAndReminders = false;
-  bool _notificationsInitialized = false;
+  bool _didInitializeReminders = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _quoteService = widget.quoteService ?? QuoteService();
-    _notificationScheduler =
-        widget.notificationScheduler ?? TaskNotificationService();
     _startQuoteRequest(stage: QuoteLoadStage.loading, notify: false);
   }
 
@@ -63,16 +57,16 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final TodoModel model = context.read<TodoModel>();
+    _reminderService = context.read<ReminderService>();
     if (!identical(_todoModel, model)) {
       _todoModel?.removeListener(_handleTodoModelChanged);
       _todoModel = model;
-      _lastReminderRevision = model.reminderRevision;
       _lastPersistenceFailureRevision = model.persistenceFailure?.revision ?? 0;
       model.addListener(_handleTodoModelChanged);
     }
-    if (!_didInitializeTasksAndReminders) {
-      _didInitializeTasksAndReminders = true;
-      _initializeTasksAndReminders();
+    if (!_didInitializeReminders) {
+      _didInitializeReminders = true;
+      _initializeReminders();
     }
   }
 
@@ -101,43 +95,20 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
         );
       });
     }
-
-    if (model.reminderRevision != _lastReminderRevision) {
-      _lastReminderRevision = model.reminderRevision;
-    } else {
-      return;
-    }
-    if (_notificationsInitialized) {
-      _reconcileReminders();
-    }
   }
 
-  Future<void> _initializeTasksAndReminders() async {
-    final String? initialTaskId = await _notificationScheduler.initialize(
+  Future<void> _initializeReminders() async {
+    final String? initialTaskId = await _reminderService.initialize(
       onTaskSelected: _selectTaskFromNotification,
     );
-    await _todoModel!.load();
     if (!mounted) {
       return;
     }
-    _notificationsInitialized = true;
-    await _reconcileReminders();
     final String? taskId = initialTaskId ?? _pendingTaskSelection;
     if (taskId != null) {
       _selectTaskFromNotification(taskId);
     }
   }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      // 权限、时区或系统队列可能在 App 离开期间变化，恢复前台时重新对账。
-      _reconcileReminders();
-    }
-  }
-
-  Future<void> _reconcileReminders() =>
-      _notificationScheduler.reconcile(List<Task>.of(_todoModel!.tasks));
 
   void _selectTaskFromNotification(String taskId) {
     if (!mounted) {
@@ -185,12 +156,12 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     final DateTime dueDateUtc = picked.toUtc();
     final bool canEnable =
         dueDateUtc.isAfter(DateTime.now().toUtc()) &&
-        _notificationScheduler.isAvailable;
+        _reminderService.isAvailable;
     setState(() {
       _selectedDueDate = dueDateUtc;
       _selectedReminderEnabled = canEnable;
     });
-    if (canEnable && !await _notificationScheduler.requestPermissions()) {
+    if (canEnable && !await _reminderService.requestPermissions()) {
       if (!mounted) {
         return;
       }
@@ -250,7 +221,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
   bool _canRemindAt(DateTime? dueDate) =>
       dueDate != null &&
       dueDate.toUtc().isAfter(DateTime.now().toUtc()) &&
-      _notificationScheduler.isAvailable;
+      _reminderService.isAvailable;
 
   Future<void> _setSelectedReminder(bool enabled) async {
     if (!enabled) {
@@ -262,7 +233,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
     if (!_canRemindAt(_selectedDueDate)) {
       return;
     }
-    final bool granted = await _notificationScheduler.requestPermissions();
+    final bool granted = await _reminderService.requestPermissions();
     if (!mounted) {
       return;
     }
@@ -291,7 +262,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
           FilledButton(
             onPressed: () async {
               Navigator.pop(dialogContext);
-              await _notificationScheduler.openNotificationSettings();
+              await _reminderService.openNotificationSettings();
             },
             child: const Text('前往系统设置'),
           ),
@@ -390,7 +361,7 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
                               });
                               return;
                             }
-                            final bool granted = await _notificationScheduler
+                            final bool granted = await _reminderService
                                 .requestPermissions();
                             if (!dialogContext.mounted) {
                               return;
@@ -500,7 +471,6 @@ class _TodoPageState extends State<TodoPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _todoModel?.removeListener(_handleTodoModelChanged);
     _highlightTimer?.cancel();
     // 页面销毁后必须取消等待中的重连，避免 Timer 回调对已销毁页面 setState。

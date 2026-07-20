@@ -71,12 +71,12 @@ void main() {
       ),
     );
     await model.load();
-    final int reminderRevision = model.reminderRevision;
+    final int taskRevision = model.taskRevision;
 
     await model.purgeExpiredDeletedTasks();
 
     expect(model.deletedTasks, isEmpty);
-    expect(model.reminderRevision, reminderRevision);
+    expect(model.taskRevision, taskRevision);
     model.dispose();
   });
 }

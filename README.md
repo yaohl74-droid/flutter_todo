@@ -103,7 +103,7 @@ class DeletedTask {
 
 `TaskStorage` 负责全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移和首次示例写入。`TodoModel extends ChangeNotifier` 持有任务列表、回收站和排序状态，调用存储层并在数据变化后执行 `notifyListeners()`；页面和任务组件通过 `context.watch` / `context.read` 展示与修改数据。
 
-`TodoModel.reminderRevision` 只在活动任务的新增、编辑、完成、删除、恢复或启动加载可能改变系统通知队列时递增，页面据此触发提醒对账。排序和过期回收站清理虽然也会 `notifyListeners()` 更新界面，但不会改变活动提醒，因此不递增该版本号。所有保存异常都在模型内部转换为带递增编号的 `TodoPersistenceFailure`，页面只展示一次错误，并允许把当前完整状态重新写入本地。
+`TodoModel.taskRevision` 只在活动任务的新增、编辑、完成、删除、恢复或启动加载可能改变系统通知队列时递增，`ReminderService` 据此触发提醒对账。排序和过期回收站清理虽然也会 `notifyListeners()` 更新界面，但不会改变活动提醒，因此不递增该版本号。所有保存异常都在模型内部转换为带递增编号的 `TodoPersistenceFailure`，页面只展示一次错误，并允许把当前完整状态重新写入本地。
 
 排序只影响显示：`TodoModel.displayedTasks` 使用任务列表副本排序，从不直接修改原始列表。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
@@ -121,7 +121,7 @@ class DeletedTask {
 
 ## 到期提醒
 
-`TaskNotificationService` 使用 `flutter_local_notifications` 管理系统通知，并通过 `TaskNotificationScheduler` 接口与页面解耦。页面在启动、恢复前台以及任务发生变化后调用 `reconcile()`；服务会取消本功能尚未触发的旧调度，再按当前任务状态重建队列。
+`TaskNotificationService` 使用 `flutter_local_notifications` 管理系统通知，并通过 `TaskNotificationScheduler` 接口与业务层解耦。`ReminderService` 订阅 `TodoModel`，在启动、恢复前台以及 `taskRevision` 变化后调用 `reconcile()`；revision 未变化时不会重复对账。并发对账请求会被串行合并，最后一次始终使用最新任务状态。底层通知服务会取消本功能尚未触发的旧调度，再按当前任务状态重建队列。
 
 - 仅调度 `reminderEnabled == true`、未完成、有截止时间且尚未到期的任务。
 - Android 使用 `inexactAllowWhileIdle`，允许系统为省电做小幅延迟，不申请精确闹钟权限。
@@ -280,6 +280,7 @@ flutter analyze
 - `Task` 分钟级过期规则，以及完成或无截止时间时不过期
 - 公共日期格式统一补零并显示到分钟
 - 提醒资格过滤、按到期时间排序以及 Apple 最近 64 条队列上限
+- `ReminderService` 在任务删除后重新对账、忽略未变化 revision，并在 dispose 后停止响应
 - 编辑任务名称、截止时间和提醒开关并持久化
 - 通知权限拒绝后回退关闭、系统设置跳转和通知点击任务高亮
 - 未完成过期任务日期标红，以及已完成任务不标红
@@ -308,6 +309,7 @@ lib/models/todo_model.dart       Provider 任务状态、排序、回收站与�
 lib/pages/todo_page.dart         TodoPage、名言状态、日期交互与通知协调
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
+lib/services/reminder_service.dart  任务监听、生命周期与提醒对账协调
 lib/services/task_notification_service.dart  通知权限、调度对账、64 条队列和点击载荷
 lib/utils/date_format.dart       全局统一的本地日期时间展示格式
 lib/widgets/quote_card.dart      每日一句 FutureBuilder、状态展示与刷新入口
@@ -316,6 +318,7 @@ lib/widgets/task_input_bar.dart  底部输入框、日期、提醒、回收站�
 test/widget_test.dart            Widget、持久化、兼容与重连状态机测试
 test/quote_service_test.dart     名言响应解析、超时和网络异常测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
+test/reminder_service_test.dart  提醒对账触发、去重与释放订阅测试
 test/task_model_test.dart        Task 过期业务规则与公共日期格式测试
 test/todo_model_test.dart        Provider 保存失败事件与提醒版本规则测试
 pubspec.yaml                     Flutter 配置与依赖
@@ -327,4 +330,4 @@ windows/                         Windows 工程
 linux/                           Linux 工程
 ```
 
-任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理，避免在这次重构中改变其他业务边界。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 继续保持为 `StatelessWidget`。
+任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；同在 App 层创建的 `ReminderService` 监听任务版本并负责系统提醒对账，销毁时移除模型与 App 生命周期监听。页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 继续保持为 `StatelessWidget`。

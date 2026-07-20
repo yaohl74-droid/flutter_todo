@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'models/todo_model.dart';
 import 'pages/todo_page.dart';
 import 'services/quote_service.dart';
+import 'services/reminder_service.dart';
 import 'services/task_notification_service.dart';
 
 void main() {
@@ -24,8 +25,19 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<TodoModel>(
-      create: (_) => (todoModel ?? TodoModel())..load(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<TodoModel>(
+          create: (_) => (todoModel ?? TodoModel())..load(),
+        ),
+        Provider<ReminderService>(
+          create: (context) => ReminderService(
+            todoModel: context.read<TodoModel>(),
+            scheduler: notificationScheduler ?? TaskNotificationService(),
+          ),
+          dispose: (_, service) => service.dispose(),
+        ),
+      ],
       child: MaterialApp(
         title: '我的待办',
         debugShowCheckedModeBanner: false,
@@ -39,10 +51,7 @@ class MyApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: TodoPage(
-          quoteService: quoteService,
-          notificationScheduler: notificationScheduler,
-        ),
+        home: TodoPage(quoteService: quoteService),
       ),
     );
   }

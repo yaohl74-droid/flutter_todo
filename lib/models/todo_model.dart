@@ -29,7 +29,7 @@ class TodoModel extends ChangeNotifier {
   bool _sortAscending = true;
   bool _isLoaded = false;
   bool _isDisposed = false;
-  int _reminderRevision = 0;
+  int _taskRevision = 0;
   int _persistenceFailureRevision = 0;
   TodoPersistenceFailure? _persistenceFailure;
   Future<void>? _loadFuture;
@@ -41,8 +41,8 @@ class TodoModel extends ChangeNotifier {
   bool get sortAscending => _sortAscending;
   bool get isLoaded => _isLoaded;
 
-  /// 只有可能改变系统提醒队列的任务变化才递增。
-  int get reminderRevision => _reminderRevision;
+  /// 只有活动任务发生变化时才递增，供提醒服务判断是否需要重新对账。
+  int get taskRevision => _taskRevision;
   TodoPersistenceFailure? get persistenceFailure => _persistenceFailure;
 
   int get completedCount => _tasks.where((task) => task.isDone).length;
@@ -122,7 +122,7 @@ class TodoModel extends ChangeNotifier {
       ..clear()
       ..addAll(snapshot.deletedTasks);
     _isLoaded = true;
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
   }
 
@@ -144,7 +144,7 @@ class TodoModel extends ChangeNotifier {
         reminderEnabled: effectiveReminder,
       ),
     );
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
     await _persist('保存新增任务', () => _storage.save(tasks: _tasks));
     return true;
@@ -155,7 +155,7 @@ class TodoModel extends ChangeNotifier {
       return;
     }
     task.isDone = isDone ?? false;
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
     await _persist('保存任务状态', () => _storage.save(tasks: _tasks));
   }
@@ -173,7 +173,7 @@ class TodoModel extends ChangeNotifier {
       ..title = title.trim()
       ..dueDate = dueDate
       ..reminderEnabled = reminderEnabled;
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
     await _persist('保存任务修改', () => _storage.save(tasks: _tasks));
   }
@@ -191,7 +191,7 @@ class TodoModel extends ChangeNotifier {
         originalIndex: originalIndex,
       ),
     );
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
     await _persist(
       '保存删除操作',
@@ -207,7 +207,7 @@ class TodoModel extends ChangeNotifier {
         ? _tasks.length
         : deletedTask.originalIndex;
     _tasks.insert(restoredIndex, deletedTask.task);
-    _reminderRevision++;
+    _taskRevision++;
     notifyListeners();
     await _persist(
       '保存恢复操作',
@@ -222,7 +222,7 @@ class TodoModel extends ChangeNotifier {
     if (_deletedTasks.length == previousLength) {
       return;
     }
-    // 这里只改变回收站，不影响活动任务和系统提醒，因此不递增 reminderRevision。
+    // 这里只改变回收站，不影响活动任务和系统提醒，因此不递增 taskRevision。
     notifyListeners();
     await _persist('清理回收站', () => _storage.save(deletedTasks: _deletedTasks));
   }

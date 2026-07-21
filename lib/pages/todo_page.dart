@@ -141,8 +141,7 @@ class _TodoPageState extends State<TodoPage> {
 
     final DateTime dueDateUtc = picked.toUtc();
     final bool canEnable =
-        dueDateUtc.isAfter(DateTime.now().toUtc()) &&
-        _reminderService.isAvailable;
+        dueDateUtc.isAfter(DateTime.now()) && _reminderService.isAvailable;
     setState(() {
       _selectedDueDate = dueDateUtc;
       _selectedReminderEnabled = canEnable;
@@ -206,7 +205,7 @@ class _TodoPageState extends State<TodoPage> {
 
   bool _canRemindAt(DateTime? dueDate) =>
       dueDate != null &&
-      dueDate.toUtc().isAfter(DateTime.now().toUtc()) &&
+      dueDate.isAfter(DateTime.now()) &&
       _reminderService.isAvailable;
 
   Future<void> _setSelectedReminder(bool enabled) async {

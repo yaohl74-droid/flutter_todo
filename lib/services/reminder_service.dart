@@ -10,9 +10,8 @@ import 'task_notification_service.dart';
 class ReminderService with WidgetsBindingObserver {
   ReminderService({
     required TodoModel todoModel,
-    required TaskNotificationScheduler scheduler,
+    required this._scheduler,
   })  : _todoModel = todoModel,
-        _scheduler = scheduler,
         _lastTaskRevision = todoModel.taskRevision {
     _todoModel.addListener(_handleTodoModelChanged);
     WidgetsBinding.instance.addObserver(this);
@@ -90,13 +89,7 @@ class ReminderService with WidgetsBindingObserver {
       while (_reconcileRequested && !_disposed) {
         _reconcileRequested = false;
         final List<Task> eligibleTasks = _todoModel.tasks
-            .where(
-              (task) =>
-                  task.reminderEnabled &&
-                  !task.isDone &&
-                  task.dueDate != null &&
-                  task.dueDate!.isAfter(DateTime.now()),
-            )
+            .where((task) => task.isEligibleForReminder)
             .toList();
         try {
           await _scheduler.reconcile(List.of(eligibleTasks));

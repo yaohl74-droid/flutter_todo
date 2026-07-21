@@ -29,6 +29,8 @@ class TodoModel extends ChangeNotifier {
   bool _sortAscending = true;
   bool _isLoaded = false;
   bool _isDisposed = false;
+  // 提醒对账版本号：仅活动任务集合或内容变化（加载/增/删/改/恢复）时递增；
+  // 回收站清理只改变已删除列表，不影响提醒对账，因此不递增。
   int _taskRevision = 0;
   int _persistenceFailureRevision = 0;
   TodoPersistenceFailure? _persistenceFailure;
@@ -135,15 +137,14 @@ class TodoModel extends ChangeNotifier {
     if (trimmedTitle.isEmpty) {
       return false;
     }
-    final bool effectiveReminder =
-        reminderEnabled && dueDate != null && dueDate.isAfter(DateTime.now());
-    _tasks.add(
-      Task(
-        title: trimmedTitle,
-        dueDate: dueDate,
-        reminderEnabled: effectiveReminder,
-      ),
+    final Task task = Task(
+      title: trimmedTitle,
+      dueDate: dueDate,
+      reminderEnabled: reminderEnabled,
     );
+    // 新增任务必然未完成，资格规则在此等价于“开启提醒且截止时间未过期”。
+    task.reminderEnabled = task.isEligibleForReminder;
+    _tasks.add(task);
     _taskRevision++;
     notifyListeners();
     await _persist('保存新增任务', () => _storage.save(tasks: _tasks));

@@ -27,6 +27,13 @@ class Task {
   /// 是否已超过截止分钟；当前分钟仍不算过期，已完成任务永远不算过期。
   bool get isOverdue => isOverdueAt(DateTime.now());
 
+  /// 是否有资格排提醒：已开启提醒、未完成、截止时间仍在未来。
+  bool get isEligibleForReminder => isEligibleForReminderAt(DateTime.now());
+
+  /// 允许测试传入固定当前时间，避免业务规则测试依赖真实时钟。
+  bool isEligibleForReminderAt(DateTime now) =>
+      reminderEnabled && !isDone && dueDate != null && dueDate!.isAfter(now);
+
   /// 允许测试传入固定当前时间，避免业务规则测试依赖真实时钟。
   bool isOverdueAt(DateTime now) {
     if (isDone || dueDate == null) {

@@ -28,8 +28,7 @@ class TaskInputBar extends StatelessWidget {
   final VoidCallback onShowTrash;
 
   bool get _dueDateIsPast =>
-      selectedDueDate != null &&
-      !selectedDueDate!.isAfter(DateTime.now().toUtc());
+      selectedDueDate != null && !selectedDueDate!.isAfter(DateTime.now());
 
   Future<void> _addTask(BuildContext context) async {
     final bool added = await context.read<TodoModel>().addTask(

@@ -179,7 +179,7 @@ class TaskNotificationService implements TaskNotificationScheduler {
 
       final List<Task> scheduledTasks = eligibleTasks(
         tasks,
-        now: DateTime.now().toUtc(),
+        now: DateTime.now(),
         limit: _isApplePlatform ? applePendingLimit : null,
       );
       final Set<int> occupiedIds = <int>{};
@@ -255,15 +255,7 @@ class TaskNotificationService implements TaskNotificationScheduler {
     int? limit,
   }) {
     final List<Task> result =
-        tasks
-            .where(
-              (task) =>
-                  task.reminderEnabled &&
-                  !task.isDone &&
-                  task.dueDate != null &&
-                  task.dueDate!.isAfter(now),
-            )
-            .toList()
+        tasks.where((task) => task.isEligibleForReminderAt(now)).toList()
           ..sort((first, second) => first.dueDate!.compareTo(second.dueDate!));
     if (limit != null && result.length > limit) {
       return result.sublist(0, limit);

@@ -233,7 +233,14 @@ class TodoModel extends ChangeNotifier {
       ..title = title.trim()
       ..dueDate = dueDate
       ..reminderEnabled = reminderEnabled;
-    task.reminderEnabled = task.isEligibleForReminder;   // 用户编辑一个任务,把截止时间改成昨天,同时保持"开启提醒"——reminderEnabled 就会是 true 但已过期
+    // 模型层兜底：截止时刻已过或没有截止时间时，提醒资格作废，
+    // 避免留下“开启提醒但已过期”的无效标记。
+    // 刻意不用 isEligibleForReminder：它含 !isDone，会连已完成任务的标记一起清掉，
+    // 取消完成后提醒就无法按约定自动恢复；完成态的过滤由提醒对账侧负责。
+    task.reminderEnabled =
+        task.reminderEnabled &&
+        task.dueDate != null &&
+        task.dueDate!.isAfter(DateTime.now());
     _taskRevision++;
     notifyListeners();
     await _persist('保存任务修改', () => _storage.save(tasks: _tasks));

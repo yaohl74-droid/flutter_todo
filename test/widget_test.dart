@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_todo/main.dart';
 import 'package:my_todo/models/task.dart';
 import 'package:my_todo/models/todo_model.dart';
+import 'package:my_todo/pages/stats_page.dart';
 import 'package:my_todo/services/task_notification_service.dart';
 
 class _FakeNotificationScheduler implements TaskNotificationScheduler {
@@ -744,5 +745,42 @@ void main() {
 
     expect(find.text('还没有任务，暂无统计数据'), findsOneWidget);
     expect(find.text('最近 7 天'), findsNothing);
+  });
+
+  testWidgets('勾选后完成时间写入存档，重启后仍进入趋势', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    // 示例任务均无截止日期，显示顺序即添加顺序，第一个是“买菜”。
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pumpAndSettle();
+
+    SharedPreferences preferences = await SharedPreferences.getInstance();
+    List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.first['title'], '买菜');
+    expect(savedTasks.first['isDone'], isTrue);
+    final String? completedAtUtc =
+        savedTasks.first['completedAtUtc'] as String?;
+    expect(completedAtUtc, isNotNull);
+    expect(DateTime.parse(completedAtUtc!).isUtc, isTrue);
+
+    // 模拟重启：趋势数据必须来自存档而不是内存。
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('stats-button')));
+    await tester.pumpAndSettle();
+
+    // 今天的柱子计数为 1，其余 6 天为 0；限定在统计页内查找，
+    // 避免匹配到仍挂在路由栈里的上一页文本。
+    final Finder statsPage = find.byType(StatsPage);
+    expect(find.descendant(of: statsPage, matching: find.text('1')), findsOneWidget);
+    expect(
+      find.descendant(of: statsPage, matching: find.text('0')),
+      findsNWidgets(6),
+    );
   });
 }

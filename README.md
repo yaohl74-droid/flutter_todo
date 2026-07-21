@@ -1,10 +1,13 @@
 # 我的待办
 
-一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加与编辑任务、设置截止日期、到期通知提醒、标记完成、删除与回收站恢复，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
+一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加与编辑任务、设置截止日期、到期通知提醒、标记完成、删除与回收站恢复、完成率与最近 7 天完成趋势统计，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
 
 ## 功能
 
 - AppBar 实时显示任务进度：`我的待办 (已完成/总数)`。
+- AppBar 右上角的统计按钮进入统计页：环形进度展示任务完成率（已完成/总数），柱状图展示最近 7 天每天的完成数（今天往前滚动 7 天）。
+- 勾选完成时记录完成时刻（UTC 存储，按设备时区归入自然日）；取消完成时清空完成时刻。从回收站恢复已完成任务时保留原完成时刻。
+- 统计功能上线前完成的任务没有完成时刻，会计入完成率，但不计入趋势；统计页上有说明文字。
 - AppBar 下方显示从每日一句接口获取的随机名言和作者，并可手动刷新。
 - 名言请求超时、断网、DNS 或 TLS 异常时会进入自动重连，每隔 60 秒重试一次，连续三次失败后停止；手动刷新会重新开始一轮尝试。
 - 名言加载、重连和失败状态都有明确提示，网络异常不会影响待办功能使用。
@@ -51,6 +54,7 @@ class Task {
   String title;
   bool isDone;
   DateTime? dueDate; // 内存中统一为 UTC
+  DateTime? completedAt; // 内存中统一为 UTC
   bool reminderEnabled;
 }
 ```
@@ -59,6 +63,7 @@ class Task {
 - `title`：任务文字。
 - `isDone`：任务是否完成。
 - `dueDate`：可空的截止绝对时刻；内存和存档中统一使用 UTC，没有设置时为 `null`。
+- `completedAt`：可空的完成时刻；勾选完成时写入当前 UTC 时刻，取消完成时清空。统计功能上线前的旧任务没有该字段，还原为 `null`，因此不计入完成趋势但仍计入完成率。
 - `reminderEnabled`：是否在截止时刻发送系统通知。
 - `isOverdue`：模型根据完成状态和截止分钟判断是否过期；当前截止分钟内不算过期。`isOverdueAt()` 可在测试中注入固定当前时间。
 
@@ -72,6 +77,7 @@ JSON 没有原生 `DateTime` 类型，因此截止时刻使用带 `Z` 的 UTC IS
   "title": "买菜",
   "isDone": false,
   "dueDateUtc": "2026-07-31T10:30:00.000Z",
+  "completedAtUtc": null,
   "reminderEnabled": true
 }
 ```
@@ -93,7 +99,7 @@ class DeletedTask {
 项目使用 [`shared_preferences`](https://pub.dev/packages/shared_preferences) 保存数据：
 
 - 存储键：`tasks`
-- 存储值：整个任务数组编码后的 JSON 字符串
+- 存储值：整个任务数组编码后的 JSON 字符串，单条任务含完成时间 `completedAtUtc`；完成时间不新增存储键，勾选触发的既有自动保存会一并写入
 - 回收站键：`deleted_tasks`，保存任务、删除时间和原始索引，超过 7 天自动清理
 - 排序偏好键：`task_sort_order`，值为 `added`、`dueDate` 或 `completion`
 - 升降序偏好键：`task_sort_ascending`，`true` 为升序，`false` 为降序
@@ -143,6 +149,7 @@ class DeletedTask {
 - 兼容没有 `dueDate` 的既有任务，读取结果为 `null`，不会影响旧数据。
 - 旧版不带时区的 `dueDate` 按首次升级时设备的本地时区解释，并立即转换为 `dueDateUtc`；迁移后始终表示固定绝对时刻。
 - 旧任务没有 `reminderEnabled` 时默认关闭提醒，避免升级后突然发送未经用户确认的通知。
+- 兼容没有 `completedAtUtc` 键的旧任务，读取结果为 `null`。统计功能上线前完成的任务没有完成时间，计入完成率但不进入完成趋势（不回填，页面有说明文字）；`isDone` 为 `false` 却带完成时间的异常数据也会归一化为 `null`，不污染趋势。缺少 `completedAtUtc` 不触发旧格式迁移回写，`null` 本身就是合法状态。
 - 老版本没有排序偏好时默认“按截止日期 + 升序”；未知排序值也安全回退到按截止日期。
 - 无效的截止日期字符串会安全降级为 `null`，不会导致启动崩溃。
 - 空字符串 ID 会被视为缺失并重新生成。
@@ -275,6 +282,12 @@ flutter analyze
 - 点击按钮与按回车添加任务
 - 添加成功 SnackBar
 - Checkbox 完成状态、删除线、灰色样式及任务统计
+- 勾选写入 UTC 完成时间、取消勾选清空
+- 完成时间 `completedAtUtc` 的 UTC ISO8601 序列化，旧 JSON 缺键与未完成带脏时间时还原为 `null`
+- 完成率为已完成占活动任务比例，没有任务时为 0
+- 完成趋势按本地自然日统计最近 7 天，更早完成、无完成时间和窗口边界外不计入
+- 从回收站恢复已完成任务保留原完成时间
+- 从主页进入统计页显示完成率、最近 7 天趋势和旧数据说明文字，没有任务时显示空态
 - 日期与时间选择器、精确到分钟的提示和新任务截止时间持久化
 - `DateTime?` 的 ISO8601 序列化、反序列化及旧数据缺字段兼容
 - 旧截止时间迁移到 UTC、新任务提醒默认值和旧任务提醒默认关闭
@@ -310,6 +323,7 @@ lib/models/task.dart             Task 数据模型与 JSON 转换
 lib/models/deleted_task.dart     回收站任务、删除时间与原始索引
 lib/models/todo_model.dart       Provider 任务状态、排序、回收站与持久化协调
 lib/pages/todo_page.dart         TodoPage、名言状态、日期交互与通知协调
+lib/pages/stats_page.dart        统计页：完成率环形进度与最近 7 天完成趋势柱状图
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
 lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
 lib/services/reminder_service.dart  任务监听、生命周期与提醒对账协调
@@ -322,8 +336,8 @@ test/widget_test.dart            Widget、持久化、兼容与重连状态机�
 test/quote_service_test.dart     名言响应解析、超时和网络异常测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
 test/reminder_service_test.dart  提醒对账触发、去重与释放订阅测试
-test/task_model_test.dart        Task 过期业务规则与公共日期格式测试
-test/todo_model_test.dart        Provider 保存失败事件与提醒版本规则测试
+test/task_model_test.dart        Task 过期业务规则、完成时间序列化与公共日期格式测试
+test/todo_model_test.dart        Provider 保存失败事件、提醒版本规则、完成时间与统计测试
 pubspec.yaml                     Flutter 配置与依赖
 android/                         Android 工程及正式网络权限
 ios/                             iOS 工程
@@ -333,4 +347,4 @@ windows/                         Windows 工程
 linux/                           Linux 工程
 ```
 
-任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；同在 App 层创建的 `ReminderService` 监听任务版本并负责系统提醒对账，销毁时移除模型与 App 生命周期监听。页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理。`QuoteCard`、`TaskTile` 和 `TaskInputBar` 继续保持为 `StatelessWidget`。
+任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；同在 App 层创建的 `ReminderService` 监听任务版本并负责系统提醒对账，销毁时移除模型与 App 生命周期监听。页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理。统计页 `StatsPage` 由 TodoPage 的 AppBar 按钮 push 进入，自身不持有状态，只通过 `context.watch` 读取 `TodoModel` 的派生数据（完成率与 `completionTrendAt()` 的 7 天分桶）。`QuoteCard`、`TaskTile`、`TaskInputBar` 和 `StatsPage` 均保持为 `StatelessWidget`。

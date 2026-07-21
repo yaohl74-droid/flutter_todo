@@ -13,6 +13,15 @@ class TodoPersistenceFailure {
   final String action;
 }
 
+/// 最近 7 天趋势中某一天的完成数量。
+class CompletionDay {
+  const CompletionDay({required this.day, required this.count});
+
+  /// 本地时区的当天零点，仅作分桶键和展示用。
+  final DateTime day;
+  final int count;
+}
+
 /// 待办任务的业务状态：统一管理任务、回收站、排序和本地持久化。
 class TodoModel extends ChangeNotifier {
   TodoModel({TaskStorage? storage}) : _storage = storage ?? TaskStorage();
@@ -48,6 +57,10 @@ class TodoModel extends ChangeNotifier {
   TodoPersistenceFailure? get persistenceFailure => _persistenceFailure;
 
   int get completedCount => _tasks.where((task) => task.isDone).length;
+
+  /// 活动任务的完成率；没有任务时为 0，避免除零。
+  double get completionRate =>
+      _tasks.isEmpty ? 0.0 : completedCount / _tasks.length;
 
   int get activeDeletedTaskCount {
     final DateTime cutoff = DateTime.now().subtract(TaskStorage.trashRetention);
@@ -97,6 +110,46 @@ class TodoModel extends ChangeNotifier {
       }
       return originalIndexes[first.id]!.compareTo(originalIndexes[second.id]!);
     });
+    return result;
+  }
+
+  /// 最近 7 天（含今天）每天的完成数，供统计页展示；测试用 completionTrendAt。
+  List<CompletionDay> get completionTrend =>
+      completionTrendAt(DateTime.now());
+
+  /// 以 now 所在的本地日为终点向前数 7 天，按本地自然日统计每天完成的任务数。
+  /// completedAt 以 UTC 存储，归组时转回设备本地时区；没有完成时间的任务
+  /// （未勾选或统计功能上线前已完成）不计入任何一天。
+  List<CompletionDay> completionTrendAt(DateTime now) {
+    final DateTime localNow = now.toLocal();
+    final DateTime today = DateTime(
+      localNow.year,
+      localNow.month,
+      localNow.day,
+    );
+
+    // 先按本地零点分桶，再取出最近 7 天；同一天多次完成分别计数。
+    final Map<DateTime, int> countByDay = <DateTime, int>{};
+    for (final Task task in _tasks) {
+      final DateTime? completedAt = task.completedAt;
+      if (completedAt == null) {
+        continue;
+      }
+      final DateTime localCompleted = completedAt.toLocal();
+      final DateTime dayKey = DateTime(
+        localCompleted.year,
+        localCompleted.month,
+        localCompleted.day,
+      );
+      countByDay[dayKey] = (countByDay[dayKey] ?? 0) + 1;
+    }
+
+    final List<CompletionDay> result = <CompletionDay>[];
+    // DateTime 构造函数会把溢出的日期规范化成上个月，跨月跨年都安全。
+    for (int offset = 6; offset >= 0; offset--) {
+      final DateTime day = DateTime(today.year, today.month, today.day - offset);
+      result.add(CompletionDay(day: day, count: countByDay[day] ?? 0));
+    }
     return result;
   }
 
@@ -155,7 +208,13 @@ class TodoModel extends ChangeNotifier {
     if (!_tasks.contains(task)) {
       return;
     }
-    task.isDone = isDone ?? false;
+    final bool nowDone = isDone ?? false;
+    // 完成时间只记录“最后一次勾选完成”的时刻；取消完成时清空，不再计入趋势。
+    // 状态没有真正翻转时不改动 completedAt，重复置为同一状态不会刷新完成时间。
+    if (task.isDone != nowDone) {
+      task.isDone = nowDone;
+      task.completedAt = nowDone ? DateTime.now().toUtc() : null;
+    }
     _taskRevision++;
     notifyListeners();
     await _persist('保存任务状态', () => _storage.save(tasks: _tasks));
@@ -174,6 +233,7 @@ class TodoModel extends ChangeNotifier {
       ..title = title.trim()
       ..dueDate = dueDate
       ..reminderEnabled = reminderEnabled;
+    task.reminderEnabled = task.isEligibleForReminder;   // 用户编辑一个任务,把截止时间改成昨天,同时保持"开启提醒"——reminderEnabled 就会是 true 但已过期
     _taskRevision++;
     notifyListeners();
     await _persist('保存任务修改', () => _storage.save(tasks: _tasks));

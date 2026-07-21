@@ -694,4 +694,55 @@ void main() {
     expect(migratedTasks, hasLength(2));
     expect(migratedTasks.every((task) => task['id'] != null), isTrue);
   });
+
+  testWidgets('从主页进入统计页显示完成率与最近 7 天趋势', (WidgetTester tester) async {
+    final DateTime now = DateTime.now();
+    // 固定为今天正午，避免测试运行时刻不同导致归属日期漂移。
+    final DateTime todayNoon = DateTime(now.year, now.month, now.day, 12);
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'done-today',
+          'title': '今天完成',
+          'isDone': true,
+          'completedAtUtc': todayNoon.toUtc().toIso8601String(),
+        },
+        // 旧格式已完成任务没有 completedAtUtc：计入完成率，但不计入趋势。
+        {'id': 'legacy-done', 'title': '升级前完成', 'isDone': true},
+        {'id': 'open', 'title': '未完成', 'isDone': false},
+      ]),
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('stats-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('统计'), findsOneWidget);
+    expect(find.text('最近 7 天'), findsOneWidget);
+    // 完成率 2/3 ≈ 67%；趋势里只有今天一根非零柱。
+    expect(find.byKey(const ValueKey<String>('stats-rate')), findsOneWidget);
+    expect(find.text('67%'), findsOneWidget);
+    expect(find.text('已完成 2 / 共 3'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('stats-note')), findsOneWidget);
+    expect(find.textContaining('不计入趋势'), findsOneWidget);
+    for (int index = 0; index < 7; index++) {
+      expect(find.byKey(ValueKey<String>('trend-bar-$index')), findsOneWidget);
+    }
+    expect(find.text('今天'), findsOneWidget);
+  });
+
+  testWidgets('没有任务时统计页显示空态', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({'tasks': '[]'});
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('stats-button')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('还没有任务，暂无统计数据'), findsOneWidget);
+    expect(find.text('最近 7 天'), findsNothing);
+  });
 }

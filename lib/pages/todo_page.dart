@@ -11,6 +11,7 @@ import '../utils/date_format.dart';
 import '../widgets/quote_card.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
+import 'stats_page.dart';
 
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
@@ -476,6 +477,21 @@ class _TodoPageState extends State<TodoPage> {
           '我的待办 (${todoModel.completedCount}/${todoModel.tasks.length})',
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            key: const ValueKey<String>('stats-button'),
+            tooltip: '统计',
+            icon: const Icon(Icons.bar_chart),
+            onPressed: () {
+              // 路由仍在 MultiProvider 子树内，StatsPage 可正常 watch TodoModel。
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (routeContext) => const StatsPage(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [

@@ -6,10 +6,12 @@ class Task {
     required this.title,
     this.isDone = false,
     DateTime? dueDate,
+    DateTime? completedAt,
     this.reminderEnabled = false,
   }) : id = id ?? _generateId(),
        // 内存中始终保存 UTC 绝对时刻，避免设备切换时区后提醒时刻漂移。
-       dueDate = dueDate?.toUtc();
+       dueDate = dueDate?.toUtc(),
+       completedAt = completedAt?.toUtc();
 
   static int _idSequence = 0;
 
@@ -22,6 +24,9 @@ class Task {
   String title;
   bool isDone;
   DateTime? dueDate;
+
+  /// 最近一次被勾选完成的时刻（UTC）；未完成的任务恒为 null。
+  DateTime? completedAt;
   bool reminderEnabled;
 
   /// 是否已超过截止分钟；当前分钟仍不算过期，已完成任务永远不算过期。
@@ -66,6 +71,7 @@ class Task {
     'isDone': isDone,
     // 新格式明确以 UTC 保存固定绝对时刻，末尾 Z 可避免跨时区解析歧义。
     'dueDateUtc': dueDate?.toUtc().toIso8601String(),
+    'completedAtUtc': completedAt?.toUtc().toIso8601String(),
     'reminderEnabled': reminderEnabled,
   };
 
@@ -77,15 +83,21 @@ class Task {
     final DateTime? legacyDueDate = DateTime.tryParse(
       json['dueDate']?.toString() ?? '',
     );
+    final bool isDone = json['isDone'] == true;
 
     return Task(
       // 旧版本 JSON 没有 id，此时传入 null，由构造函数自动补一个唯一 ID。
       id: savedId == null || savedId.isEmpty ? null : savedId,
       // 不再强制把 null 转成 String，避免损坏或旧数据导致启动崩溃。
       title: json['title']?.toString() ?? '',
-      isDone: json['isDone'] == true,
+      isDone: isDone,
       // 旧 dueDate 没有时区信息：迁移时按当前设备本地时区解释，再转成 UTC。
       dueDate: utcDueDate ?? legacyDueDate?.toUtc(),
+      // 旧存档没有 completedAtUtc 键，tryParse 失败或缺失都还原为 null。
+      // 只在任务确实完成时采信完成时间：未完成却带时间的脏数据不进趋势统计。
+      completedAt: isDone
+          ? DateTime.tryParse(json['completedAtUtc']?.toString() ?? '')
+          : null,
       // 旧任务默认不提醒，避免升级后未经用户确认突然产生通知。
       reminderEnabled: json['reminderEnabled'] == true,
     );

@@ -32,35 +32,45 @@ class StatsPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('统计')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: hasTasks
-                  ? _buildCompletionRate(todoModel)
-                  : const Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Text(
-                          '还没有任务，暂无统计数据',
-                          style: TextStyle(fontSize: 16, color: Color(0xFF66806C)),
+      // 宽屏（Web/桌面）下把内容限制在 640 宽并水平居中，避免卡片铺满
+      // 整个窗口、右边缘被截断；窄屏（手机）可用宽度不足 640，自然保持铺满。
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: hasTasks
+                      ? _buildCompletionRate(todoModel)
+                      : const Center(
+                          child: Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Text(
+                              '还没有任务，暂无统计数据',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF66806C),
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-            ),
-          ),
-          if (hasTasks) ...[
-            const SizedBox(height: 16),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: _buildTrend(todoModel),
+                ),
               ),
-            ),
-          ],
-        ],
+              if (hasTasks) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: _buildTrend(todoModel),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

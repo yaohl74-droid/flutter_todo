@@ -63,6 +63,16 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  fonts:
+    # 思源黑体 CN（OFL 开源许可）子集字体。Flutter Web 默认字体中文字形不全，
+    # 缺字会显示成豆腐块（如“趋”“佚”）；各平台统一走该字体保证渲染一致。
+    # 子集含项目源码用字与 GB2312 一级常用汉字，可覆盖用户日常输入。
+    - family: SourceHanSansCN
+      fonts:
+        - asset: assets/fonts/SourceHanSansCN-Regular-Subset.otf
+        - asset: assets/fonts/SourceHanSansCN-Bold-Subset.otf
+          weight: 700
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

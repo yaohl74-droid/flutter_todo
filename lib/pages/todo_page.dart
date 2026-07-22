@@ -209,6 +209,9 @@ class _TodoPageState extends State<TodoPage> {
       dueDate.isAfter(DateTime.now()) &&
       _reminderService.isAvailable;
 
+  bool _isPast(DateTime? date) =>
+      date != null && !date.isAfter(DateTime.now());
+
   Future<void> _setSelectedReminder(bool enabled) async {
     if (!enabled) {
       setState(() {
@@ -331,13 +334,16 @@ class _TodoPageState extends State<TodoPage> {
                     key: const ValueKey<String>('edit-reminder-switch'),
                     contentPadding: EdgeInsets.zero,
                     title: const Text('到期提醒'),
-                    subtitle: canEnableReminder
-                        ? const Text('到期时发送系统通知和提示音')
-                        : Text(
-                            editedDueDate == null
-                                ? '请先设置截止时间'
-                                : '截止时间已过，无法设置提醒',
-                          ),
+                    // 区分四种状态：未设日期 / 可开启 / 已过期 / 平台不支持。
+                    // 过去把“平台不支持”和“已过期”混成同一句，导致 Web 等不支持
+                    // 提醒的平台上，设任何未来时间都误报“已过期”。
+                    subtitle: editedDueDate == null
+                        ? const Text('请先设置截止时间')
+                        : canEnableReminder
+                            ? const Text('到期时发送系统通知和提示音')
+                            : _isPast(editedDueDate)
+                                ? const Text('截止时间已过，无法设置提醒')
+                                : const Text('当前平台不支持到期提醒'),
                     value: editedReminderEnabled && canEnableReminder,
                     onChanged: canEnableReminder
                         ? (enabled) async {

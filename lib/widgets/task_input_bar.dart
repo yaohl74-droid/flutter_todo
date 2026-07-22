@@ -30,6 +30,16 @@ class TaskInputBar extends StatelessWidget {
   bool get _dueDateIsPast =>
       selectedDueDate != null && !selectedDueDate!.isAfter(DateTime.now());
 
+  /// 提醒开关不可用时的说明：未设日期不提示；已过期提示过期；
+  /// 日期有效但平台不支持（Web/Windows/Linux）时说明平台限制，
+  /// 避免把“不支持”误显示成“已过期”。
+  String? get _reminderDisabledReason {
+    if (selectedDueDate == null || canEnableReminder) {
+      return null;
+    }
+    return _dueDateIsPast ? '截止时间已过，无法设置提醒' : '当前平台不支持到期提醒';
+  }
+
   Future<void> _addTask(BuildContext context) async {
     final bool added = await context.read<TodoModel>().addTask(
       title: controller.text,
@@ -150,12 +160,16 @@ class TaskInputBar extends StatelessWidget {
                 ),
               ],
             ),
-            if (_dueDateIsPast)
-              const Align(
+            if (_reminderDisabledReason != null)
+              Align(
                 alignment: Alignment.centerRight,
                 child: Text(
-                  '截止时间已过，无法设置提醒',
-                  style: TextStyle(fontSize: 11, color: Colors.red),
+                  _reminderDisabledReason!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    // 过期是用户可纠正的错误，标红；平台不支持是客观限制，用中性色。
+                    color: _dueDateIsPast ? Colors.red : const Color(0xFF4F6F56),
+                  ),
                 ),
               ),
           ],

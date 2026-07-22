@@ -386,6 +386,81 @@ void main() {
     expect(savedTasks.single['reminderEnabled'], isTrue);
   });
 
+  testWidgets('不支持提醒的平台编辑未来任务显示平台提示而非过期', (
+    WidgetTester tester,
+  ) async {
+    // 默认 fake scheduler 的 isAvailable 为 false，模拟 Web/Windows/Linux。
+    final DateTime futureDue = DateTime.now()
+        .add(const Duration(days: 1))
+        .toUtc();
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'future-task',
+          'title': '未来任务',
+          'isDone': false,
+          'dueDateUtc': futureDue.toIso8601String(),
+          'reminderEnabled': false,
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('未来任务'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前平台不支持到期提醒'), findsOneWidget);
+    expect(find.text('截止时间已过，无法设置提醒'), findsNothing);
+  });
+
+  testWidgets('编辑已过期任务仍显示过期提示', (WidgetTester tester) async {
+    final DateTime pastDue = DateTime.now()
+        .subtract(const Duration(days: 1))
+        .toUtc();
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'past-task',
+          'title': '过期任务',
+          'isDone': false,
+          'dueDateUtc': pastDue.toIso8601String(),
+          'reminderEnabled': false,
+        },
+      ]),
+    });
+
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('过期任务'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('截止时间已过，无法设置提醒'), findsOneWidget);
+    expect(find.text('当前平台不支持到期提醒'), findsNothing);
+  });
+
+  testWidgets('不支持提醒的平台选未来日期在录入区显示平台提示', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey<String>('due-date-button')));
+    await tester.pumpAndSettle();
+    final CalendarDatePicker picker = tester.widget<CalendarDatePicker>(
+      find.byType(CalendarDatePicker),
+    );
+    picker.onDateChanged(DateTime.now().add(const Duration(days: 1)));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'OK'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('当前平台不支持到期提醒'), findsOneWidget);
+    expect(find.text('截止时间已过，无法设置提醒'), findsNothing);
+  });
+
   testWidgets('通知权限拒绝后提醒回退关闭并可前往设置', (WidgetTester tester) async {
     final DateTime futureDueDate = DateTime.now()
         .add(const Duration(days: 1))

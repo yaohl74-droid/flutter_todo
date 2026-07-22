@@ -45,6 +45,10 @@ class MyApp extends StatelessWidget {
         theme: ThemeData(
           // 用低饱和度绿色作为种子色，生成统一、柔和的 Material 配色。
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF6F9D7A)),
+          // 统一使用打包的思源黑体 CN 子集字体：Flutter Web 默认字体中文字形
+          // 不全，“趋”“佚”这类字会显示成豆腐块；其余平台同样走该字体，
+          // 保证各端渲染一致。
+          fontFamily: 'SourceHanSansCN',
           scaffoldBackgroundColor: const Color(0xFFF4F8F4),
           appBarTheme: const AppBarTheme(
             backgroundColor: Color(0xFFE5F1E7),

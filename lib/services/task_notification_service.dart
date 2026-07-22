@@ -76,7 +76,14 @@ class TaskNotificationService implements TaskNotificationScheduler {
           }
         },
       );
-      _initialized = initialized != false;
+      // macOS 的 initialize 会把“权限授予结果”当成返回值回传：启动时我们故意不
+      // 申请权限（request*Permission 全 false），插件便回 false，那不是初始化失败。
+      // 真正的初始化在平台侧同步完成（UNUserNotificationCenter 的 delegate 在
+      // register 时已挂好），不依赖权限；只要没抛异常即视为可用。
+      // iOS/Android 的回值语义不同（iOS 为初始化结果、Android 为 null），沿用 != false。
+      _initialized =
+          initialized != false ||
+          defaultTargetPlatform == TargetPlatform.macOS;
       if (!_initialized) {
         return null;
       }

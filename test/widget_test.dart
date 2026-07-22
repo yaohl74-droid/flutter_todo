@@ -126,6 +126,123 @@ void main() {
     expect(find.byType(Checkbox), findsNWidgets(3));
   });
 
+  testWidgets('快速添加解析标题和截止时间，按钮与回车共用规则', (WidgetTester tester) async {
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler();
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    final DateTime beforeSubmit = DateTime.now();
+    await tester.enterText(find.byType(TextField), '明天下午3点开会');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+
+    expect(find.text('开会'), findsOneWidget);
+    expect(find.text('明天下午3点开会'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), '后天上午9点写周报');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+
+    expect(find.text('写周报'), findsOneWidget);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    final DateTime firstDueDate = DateTime.parse(
+      savedTasks[savedTasks.length - 2]['dueDateUtc'] as String,
+    ).toLocal();
+    final DateTime secondDueDate = DateTime.parse(
+      savedTasks.last['dueDateUtc'] as String,
+    ).toLocal();
+    final DateTime expectedTomorrow = DateTime(
+      beforeSubmit.year,
+      beforeSubmit.month,
+      beforeSubmit.day + 1,
+      15,
+    );
+    final DateTime expectedDayAfterTomorrow = DateTime(
+      beforeSubmit.year,
+      beforeSubmit.month,
+      beforeSubmit.day + 2,
+      9,
+    );
+    expect(firstDueDate, expectedTomorrow);
+    expect(secondDueDate, expectedDayAfterTomorrow);
+    expect(scheduler.permissionRequestCount, 0);
+  });
+
+  testWidgets('无法解析时保留整句并且不设置截止时间', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '每周一开会');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+
+    expect(find.text('每周一开会'), findsOneWidget);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['dueDateUtc'], isNull);
+  });
+
+  testWidgets('解析出的未来时间自动申请权限并开启提醒', (WidgetTester tester) async {
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+    );
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '明天下午3点提醒任务');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    expect(scheduler.permissionRequestCount, 1);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['title'], '提醒任务');
+    expect(savedTasks.last['reminderEnabled'], isTrue);
+  });
+
+  testWidgets('解析提醒权限被拒绝时仍保存任务并关闭提醒', (WidgetTester tester) async {
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+      permission: false,
+    );
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '明天下午3点权限任务');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('通知权限未开启'), findsOneWidget);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['title'], '权限任务');
+    expect(savedTasks.last['reminderEnabled'], isFalse);
+  });
+
+  testWidgets('明确今天的过期时间不申请提醒权限', (WidgetTester tester) async {
+    final _FakeNotificationScheduler scheduler = _FakeNotificationScheduler(
+      isAvailable: true,
+    );
+    await tester.pumpWidget(_buildTestApp(notificationScheduler: scheduler));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '今天00:00过期任务');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+
+    expect(scheduler.permissionRequestCount, 0);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['title'], '过期任务');
+    expect(savedTasks.last['reminderEnabled'], isFalse);
+  });
+
   testWidgets('点击复选框切换任务完成样式', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
 
@@ -550,10 +667,12 @@ void main() {
         .widget<Text>(selectedDateTime)
         .data!;
 
-    await tester.enterText(find.byType(TextField), '今天到期');
+    await tester.enterText(find.byType(TextField), '明天下午3点手动日期任务');
     await tester.tap(find.text('添加'));
     await tester.pump();
 
+    expect(find.text('手动日期任务'), findsOneWidget);
+    expect(find.text('明天下午3点手动日期任务'), findsNothing);
     expect(find.text('截止日期：$displayedDateTime'), findsOneWidget);
     expect(find.text(displayedDateTime), findsNothing);
 

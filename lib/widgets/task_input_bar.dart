@@ -12,7 +12,7 @@ class TaskInputBar extends StatelessWidget {
     required this.selectedDueDate,
     required this.reminderEnabled,
     required this.canEnableReminder,
-    required this.onTaskAdded,
+    required this.onAddTask,
     required this.onPickDueDate,
     required this.onReminderChanged,
     required this.onShowTrash,
@@ -22,7 +22,7 @@ class TaskInputBar extends StatelessWidget {
   final DateTime? selectedDueDate;
   final bool reminderEnabled;
   final bool canEnableReminder;
-  final VoidCallback onTaskAdded;
+  final Future<void> Function(String input) onAddTask;
   final VoidCallback onPickDueDate;
   final ValueChanged<bool> onReminderChanged;
   final VoidCallback onShowTrash;
@@ -40,21 +40,7 @@ class TaskInputBar extends StatelessWidget {
     return _dueDateIsPast ? '截止时间已过，无法设置提醒' : '当前平台不支持到期提醒';
   }
 
-  Future<void> _addTask(BuildContext context) async {
-    final bool added = await context.read<TodoModel>().addTask(
-      title: controller.text,
-      dueDate: selectedDueDate,
-      reminderEnabled: reminderEnabled,
-    );
-    if (!added || !context.mounted) {
-      return;
-    }
-    controller.clear();
-    onTaskAdded();
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加')));
-  }
+  Future<void> _addTask() => onAddTask(controller.text);
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +60,7 @@ class TaskInputBar extends StatelessWidget {
                   child: TextField(
                     controller: controller,
                     textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _addTask(context),
+                    onSubmitted: (_) => _addTask(),
                     decoration: const InputDecoration(
                       hintText: '请输入任务',
                       filled: true,
@@ -94,7 +80,7 @@ class TaskInputBar extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  onPressed: () => _addTask(context),
+                  onPressed: _addTask,
                   child: const Text('添加'),
                 ),
               ],

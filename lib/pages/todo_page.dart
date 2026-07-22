@@ -8,6 +8,7 @@ import '../models/task.dart';
 import '../models/todo_model.dart';
 import '../services/reminder_service.dart';
 import '../utils/date_format.dart';
+import '../utils/natural_language_task_parser.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
 import 'stats_page.dart';
@@ -128,6 +129,61 @@ class _TodoPageState extends State<TodoPage> {
         });
       }
     });
+  }
+
+  Future<void> _addTaskFromInput(String input) async {
+    // 一次提交只读取一次当前时间，保证相对日期解析与提醒资格判断一致。
+    final DateTime now = DateTime.now();
+    final ParsedTaskInput? parsed = parseNaturalLanguageTask(input, now: now);
+    final String title = parsed?.title ?? input;
+    if (title.trim().isEmpty) {
+      return;
+    }
+
+    // 解析结果不会提前写入页面草稿，因此非空草稿只可能来自手动日期选择器。
+    // 手动时间优先，但仍采用解析器清理过时间词的标题。
+    final bool hasManuallySelectedDueDate = _selectedDueDate != null;
+    final DateTime? dueDate = hasManuallySelectedDueDate
+        ? _selectedDueDate
+        : parsed?.dueDate.toUtc();
+    bool reminderEnabled = hasManuallySelectedDueDate
+        ? _selectedReminderEnabled
+        : false;
+    bool permissionDenied = false;
+
+    if (!hasManuallySelectedDueDate &&
+        dueDate != null &&
+        dueDate.isAfter(now) &&
+        _reminderService.isAvailable) {
+      reminderEnabled = await _reminderService.requestPermissions();
+      if (!mounted) {
+        return;
+      }
+      permissionDenied = !reminderEnabled;
+    }
+
+    final bool added = await context.read<TodoModel>().addTask(
+      title: title,
+      dueDate: dueDate,
+      reminderEnabled: reminderEnabled,
+    );
+    if (!added || !mounted) {
+      return;
+    }
+
+    _taskController.clear();
+    setState(() {
+      // 截止日期和提醒只属于本次新任务，添加后清空草稿。
+      _selectedDueDate = null;
+      _selectedReminderEnabled = false;
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已添加')));
+
+    if (permissionDenied) {
+      await _showNotificationPermissionDialog();
+    }
   }
 
   Future<void> _pickDueDateTime() async {
@@ -593,13 +649,7 @@ class _TodoPageState extends State<TodoPage> {
             selectedDueDate: _selectedDueDate,
             reminderEnabled: _selectedReminderEnabled,
             canEnableReminder: _canRemindAt(_selectedDueDate),
-            onTaskAdded: () {
-              setState(() {
-                // 截止日期和提醒只属于本次新任务，添加后清空草稿。
-                _selectedDueDate = null;
-                _selectedReminderEnabled = false;
-              });
-            },
+            onAddTask: _addTaskFromInput,
             onPickDueDate: _pickDueDateTime,
             onReminderChanged: _setSelectedReminder,
             onShowTrash: _showTrash,

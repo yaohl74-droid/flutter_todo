@@ -4,12 +4,13 @@ Flutter 待办清单 App,支持 Android / macOS / Web / Linux。
 
 ## 架构
 
-lib/ 按职责分四层:
+lib/ 按职责分五层:
 
 - `models/` —— 状态与业务事实。TodoModel 是 ChangeNotifier;Task 等数据类的业务判断(如 isOverdue、isEligibleForReminder)写成 getter 放这里
 - `services/` —— 存储与系统能力。TaskStorage、ReminderService、TaskNotificationScheduler
 - `pages/` —— 页面组装
 - `widgets/` —— 纯展示 StatelessWidget,不持有业务状态,通过参数接收数据、回调上报事件
+- `utils/` —— 无状态的格式化与解析逻辑;自然语言日期解析必须注入当前时间并保持纯函数
 
 状态管理:Provider(MultiProvider 挂 TodoModel 和 ReminderService)。
 build 里用 `context.watch`,回调里用 `context.read`。
@@ -21,6 +22,7 @@ build 里用 `context.watch`,回调里用 `context.read`。
 - **派生数据不落库**:排序、筛选、统计等生成副本,不修改 `_tasks` 本身;能算出来的值不单独存字段
 - **业务规则收归模型**:同一条判断只写一处,Widget 只管展示
 - **异步安全**:`await` 后调 setState 前检查 `mounted`;ChangeNotifier 里用 `_isDisposed` 守卫;Timer 必须在 dispose 里 cancel
+- **时间规则可测**:依赖当前时间的纯逻辑接受 `DateTime now`,不在解析器内部直接读取系统时钟
 - **列表 key**:用数据自身 id,不用 index
 - **数据迁移**:改 Task 结构时,`fromJson` 必须兼容旧格式(`?.toString() ?? 默认值`、`tryParse` 而非 `parse`)
 - 注释用中文

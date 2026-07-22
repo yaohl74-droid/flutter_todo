@@ -73,7 +73,7 @@ void main() {
     expect(find.text('写代码'), findsOneWidget);
     expect(find.text('跑步'), findsOneWidget);
     expect(find.byType(Checkbox), findsNWidgets(3));
-    expect(find.byType(Card), findsNWidgets(4));
+    expect(find.byType(Card), findsNWidgets(3));
     expect(find.byType(Dismissible), findsNWidgets(3));
     expect(find.text('排序：按截止日期（升序）'), findsOneWidget);
     expect(find.byType(PopupMenuButton<TaskSortOrder>), findsOneWidget);
@@ -174,11 +174,6 @@ void main() {
     expect(find.text('我的待办 (0/0)'), findsOneWidget);
     expect(find.byIcon(Icons.task_alt), findsOneWidget);
     expect(find.text('还没有任务,添加一条吧'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey<String>('daily-quote-card')),
-      findsOneWidget,
-    );
-    expect(find.byType(Card), findsOneWidget);
   });
 
   testWidgets('按回车提交任务并显示提示', (WidgetTester tester) async {

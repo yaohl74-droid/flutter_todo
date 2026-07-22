@@ -1,6 +1,6 @@
 # 我的待办
 
-一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持每日一句、添加与编辑任务、设置截止日期、到期通知提醒、标记完成、删除与回收站恢复、完成率与最近 7 天完成趋势统计，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
+一个使用 Flutter 和 Material Design 构建的跨平台待办 App。支持添加与编辑任务、设置截止日期、到期通知提醒、标记完成、删除与回收站恢复、完成率与最近 7 天完成趋势统计，并通过 `shared_preferences` 将任务以 JSON 格式保存在本地，重新启动 App 后任务不会丢失。
 
 ## 功能
 
@@ -8,9 +8,6 @@
 - AppBar 右上角的统计按钮进入统计页：环形进度展示任务完成率（已完成/总数），柱状图展示最近 7 天每天的完成数（今天往前滚动 7 天）。统计页在宽屏（Web/桌面）下内容限宽 640 并水平居中，手机窄屏保持铺满。
 - 勾选完成时记录完成时刻（UTC 存储，按设备时区归入自然日）；取消完成时清空完成时刻。从回收站恢复已完成任务时保留原完成时刻。
 - 统计功能上线前完成的任务没有完成时刻，会计入完成率，但不计入趋势；统计页上有说明文字。
-- AppBar 下方显示从每日一句接口获取的随机名言和作者，并可手动刷新。
-- 名言请求超时、断网、DNS 或 TLS 异常时会进入自动重连，每隔 60 秒重试一次，连续三次失败后停止；手动刷新会重新开始一轮尝试。
-- 名言加载、重连和失败状态都有明确提示，网络异常不会影响待办功能使用。
 - 顶部排序工具栏提供三种显示顺序：
   - 按添加顺序。
   - 按截止日期（默认），没有截止日期的排在最后。
@@ -115,16 +112,6 @@ class DeletedTask {
 
 排序只影响显示：`TodoModel.displayedTasks` 使用任务列表副本排序，从不直接修改原始列表。原始列表始终保持添加顺序，因此删除任务记录的原始索引仍然可靠，从回收站恢复时可以回到正确位置。排序副本使用唯一任务 ID 查询原始索引，同一截止时间或相同完成状态的任务会继续按添加顺序显示，也不会依赖 `Task` 的对象相等规则。升序和降序会应用于当前排序字段；无截止日期任务会绕过方向翻转，始终排在最后。
 
-## 每日一句
-
-`QuoteService` 使用 `http` 包请求 `https://uapis.cn/api/v1/saying`，并把响应中的 `text` 转换为 `Quote`；该接口不返回作者，因此统一显示“佚名”。接口支持浏览器跨域访问，可用于 Flutter Web。页面通过 `FutureBuilder<Quote>` 展示单次请求的加载、成功和失败状态；定时重连由 `TodoPage` 的 `QuoteLoadStage` 状态枚举和 `Timer` 管理，不与展示逻辑混在一起。
-
-- 单次请求超时：8 秒。
-- 自动重连间隔：60 秒。
-- 最大自动重连次数：3 次。
-- 等待及重连期间可随时点击刷新，取消旧 Timer 并把计数清零。
-- 页面销毁时会取消 Timer 并关闭 `http.Client`，避免延迟回调访问已经销毁的 State，同时释放网络连接。
-
 异步操作结束后，如果还需要访问页面或调用 `setState`，代码会检查 `mounted`，避免操作已经销毁的 State。回收站恢复操作也会先执行该检查。
 
 ## 到期提醒
@@ -180,18 +167,12 @@ class DeletedTask {
 - iOS 配置 `UNUserNotificationCenter` delegate，使前台通知能够正常展示。
 - macOS 由通知插件注册通知中心 delegate，并沿用现有 App Sandbox 配置。
 
-每日一句需要各平台允许出站 HTTPS 请求：
-
-- Android 主清单声明 `android.permission.INTERNET`，确保正式构建可以联网。
-- macOS 的 Debug/Profile 与 Release entitlement 都启用 `com.apple.security.network.client`；只配置 `network.server` 不能授权 App 主动访问接口。
-- Web 使用支持 CORS 的 UAPI 接口，可从 `localhost` 等浏览器来源直接请求。
-
 数据保存在当前设备和当前应用的本地存储中，不是云同步：
 
 - 不同设备之间不会自动共享任务。
 - 卸载 App、清除应用数据或清除浏览器站点数据后，本地任务可能丢失。
 
-中文渲染统一使用子集化的思源黑体 CN（`assets/fonts/`，OFL 开源许可），由 `ThemeData.fontFamily` 全局应用，含 Regular 与 Bold 两个字重。Flutter Web 的默认字体中文字形不全，缺字会显示成豆腐块（如“趋”“佚”）；子集包含项目源码用字与 GB2312 一级常用汉字（约 4960 字符，每个字重约 1 MB）。新增界面文字若超出子集范围，用 `fonttools` 的 `pyftsubset` 从全量思源黑体 CN 重新裁剪即可。
+中文渲染统一使用子集化的思源黑体 CN（`assets/fonts/`，OFL 开源许可），由 `ThemeData.fontFamily` 全局应用，含 Regular 与 Bold 两个字重。Flutter Web 的默认字体中文字形不全，缺字会显示成豆腐块（如“趋”）；子集包含项目源码用字与 GB2312 一级常用汉字（约 4960 字符，每个字重约 1 MB）。新增界面文字若超出子集范围，用 `fonttools` 的 `pyftsubset` 从全量思源黑体 CN 重新裁剪即可。
 
 ## 环境与安装
 
@@ -207,12 +188,6 @@ flutter pub get
 
 ```bash
 flutter pub add shared_preferences
-```
-
-每日一句使用 `http` 包：
-
-```bash
-flutter pub add http
 ```
 
 到期提醒使用本地通知、时区和系统设置依赖：
@@ -235,7 +210,6 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.5
-  http: ^1.6.0
   flutter_local_notifications: ^22.1.0
   timezone: ^0.11.1
   app_settings: ^7.0.0
@@ -317,10 +291,6 @@ flutter analyze
 - `Dismissible` key 唯一性
 - 旧 JSON 缺少 ID 时自动补全
 - 旧字符串数组迁移和损坏记录容错
-- 每日一句加载、成功、网络错误和手动刷新状态
-- 8 秒请求超时，以及超时、断网和 DNS 等异常触发自动重连
-- 手动刷新取消旧 Timer、重置重连计数，以及页面销毁时取消 Timer
-- UAPI `text` 响应解析、作者回退为“佚名”和网络异常转换
 
 ## 项目结构
 
@@ -329,30 +299,27 @@ lib/main.dart                    App 入口与 MyApp 根组件
 lib/models/task.dart             Task 数据模型与 JSON 转换
 lib/models/deleted_task.dart     回收站任务、删除时间与原始索引
 lib/models/todo_model.dart       Provider 任务状态、排序、回收站与持久化协调
-lib/pages/todo_page.dart         TodoPage、名言状态、日期交互与通知协调
+lib/pages/todo_page.dart         TodoPage、日期交互与通知协调
 lib/pages/stats_page.dart        统计页：完成率环形进度与最近 7 天完成趋势柱状图
 lib/services/task_storage.dart   任务持久化、排序偏好与旧数据迁移
-lib/services/quote_service.dart  名言模型、HTTP 请求、超时和异常转换
 lib/services/reminder_service.dart  任务监听、生命周期与提醒对账协调
 lib/services/task_notification_service.dart  通知权限、调度对账、64 条队列和点击载荷
 lib/utils/date_format.dart       全局统一的本地日期时间展示格式
-lib/widgets/quote_card.dart      每日一句 FutureBuilder、状态展示与刷新入口
 lib/widgets/task_tile.dart       单条任务的滑动删除、卡片、勾选与编辑入口
 lib/widgets/task_input_bar.dart  底部输入框、日期、提醒、回收站与添加入口
-test/widget_test.dart            Widget、持久化、兼容与重连状态机测试
-test/quote_service_test.dart     名言响应解析、超时和网络异常测试
+test/widget_test.dart            Widget、持久化与兼容测试
 test/task_notification_service_test.dart  提醒资格与队列上限测试
 test/reminder_service_test.dart  提醒对账触发、去重与释放订阅测试
 test/task_model_test.dart        Task 过期业务规则、完成时间序列化与公共日期格式测试
 test/todo_model_test.dart        Provider 保存失败事件、提醒版本规则、完成时间与统计测试
 pubspec.yaml                     Flutter 配置与依赖
 assets/fonts/                    子集化的思源黑体 CN 中文字体（修复 Web 缺字豆腐块）
-android/                         Android 工程及正式网络权限
+android/                         Android 工程
 ios/                             iOS 工程
 web/                             Web 工程
-macos/                           macOS 工程及沙箱网络权限
+macos/                           macOS 工程及 App Sandbox 配置
 windows/                         Windows 工程
 linux/                           Linux 工程
 ```
 
-任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；同在 App 层创建的 `ReminderService` 监听任务版本并负责系统提醒对账，销毁时移除模型与 App 生命周期监听。页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。每日一句的 Future、重连 Timer 与状态枚举仍保留在 `_TodoPageState`，日期和提醒输入草稿也仍由页面管理。统计页 `StatsPage` 由 TodoPage 的 AppBar 按钮 push 进入，自身不持有状态，只通过 `context.watch` 读取 `TodoModel` 的派生数据（完成率与 `completionTrendAt()` 的 7 天分桶）。`QuoteCard`、`TaskTile`、`TaskInputBar` 和 `StatsPage` 均保持为 `StatelessWidget`。
+任务业务状态由根组件上的 `ChangeNotifierProvider<TodoModel>` 提供；同在 App 层创建的 `ReminderService` 监听任务版本并负责系统提醒对账，销毁时移除模型与 App 生命周期监听。页面与子组件使用 `context.watch` 订阅展示数据，使用 `context.read` 调用增删改、恢复和排序方法。日期和提醒输入草稿由页面管理。统计页 `StatsPage` 由 TodoPage 的 AppBar 按钮 push 进入，自身不持有状态，只通过 `context.watch` 读取 `TodoModel` 的派生数据（完成率与 `completionTrendAt()` 的 7 天分桶）。`TaskTile`、`TaskInputBar` 和 `StatsPage` 均保持为 `StatelessWidget`。

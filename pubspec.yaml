@@ -35,7 +35,6 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.5
-  http: ^1.6.0
   flutter_local_notifications: ^22.1.0
   timezone: ^0.11.1
   app_settings: ^7.0.0
@@ -65,7 +64,7 @@ flutter:
 
   fonts:
     # 思源黑体 CN（OFL 开源许可）子集字体。Flutter Web 默认字体中文字形不全，
-    # 缺字会显示成豆腐块（如“趋”“佚”）；各平台统一走该字体保证渲染一致。
+    # 缺字会显示成豆腐块（如“趋”）；各平台统一走该字体保证渲染一致。
     # 子集含项目源码用字与 GB2312 一级常用汉字，可覆盖用户日常输入。
     - family: SourceHanSansCN
       fonts:

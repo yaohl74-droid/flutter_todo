@@ -8,7 +8,6 @@ import '../models/task.dart';
 import '../models/todo_model.dart';
 import '../services/reminder_service.dart';
 import '../utils/date_format.dart';
-import '../widgets/quote_card.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
 import 'stats_page.dart';
@@ -501,7 +500,6 @@ class _TodoPageState extends State<TodoPage> {
       ),
       body: Column(
         children: [
-          const QuoteCard(),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
             child: Row(

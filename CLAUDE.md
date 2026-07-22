@@ -6,12 +6,12 @@ Flutter 待办清单 App,支持 Android / macOS / Web / Linux。
 
 lib/ 按职责分四层:
 
-- `models/` —— 状态与业务事实。TodoModel、QuoteModel 是 ChangeNotifier;Task 等数据类的业务判断(如 isOverdue、isEligibleForReminder)写成 getter 放这里
-- `services/` —— 存储、网络、系统能力。TaskStorage、QuoteService、ReminderService、TaskNotificationScheduler
+- `models/` —— 状态与业务事实。TodoModel 是 ChangeNotifier;Task 等数据类的业务判断(如 isOverdue、isEligibleForReminder)写成 getter 放这里
+- `services/` —— 存储与系统能力。TaskStorage、ReminderService、TaskNotificationScheduler
 - `pages/` —— 页面组装
 - `widgets/` —— 纯展示 StatelessWidget,不持有业务状态,通过参数接收数据、回调上报事件
 
-状态管理:Provider(MultiProvider 挂 TodoModel 和 QuoteModel)。
+状态管理:Provider(MultiProvider 挂 TodoModel 和 ReminderService)。
 build 里用 `context.watch`,回调里用 `context.read`。
 
 ## 编码约定

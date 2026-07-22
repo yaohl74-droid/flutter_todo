@@ -6,9 +6,6 @@
 	<true/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
-	<!-- 每日一句需要允许 macOS App Sandbox 主动发起 HTTPS 请求。 -->
-	<key>com.apple.security.network.client</key>
-	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
 </dict>

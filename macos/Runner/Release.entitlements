@@ -4,8 +4,5 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
-	<!-- 每日一句需要允许正式版主动访问名言 API。 -->
-	<key>com.apple.security.network.client</key>
-	<true/>
 </dict>
 </plist>

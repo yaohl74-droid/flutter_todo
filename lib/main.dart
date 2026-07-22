@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'models/quote_model.dart';
 import 'models/todo_model.dart';
 import 'pages/todo_page.dart';
 import 'services/reminder_service.dart';
@@ -27,9 +26,6 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<TodoModel>(
           create: (_) => (todoModel ?? TodoModel())..load(),
-        ),
-        ChangeNotifierProvider<QuoteModel>(
-          create: (_) => QuoteModel()..refresh(),
         ),
         Provider<ReminderService>(
           create: (context) => ReminderService(

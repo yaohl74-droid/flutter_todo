@@ -1,6 +1,4 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- 每日一句需要在正式构建中访问 Quotable API。 -->
-    <uses-permission android:name="android.permission.INTERNET"/>
     <!-- 重启设备后由通知插件恢复尚未到期的任务提醒。 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application

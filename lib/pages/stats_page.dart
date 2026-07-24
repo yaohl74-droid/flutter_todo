@@ -136,21 +136,19 @@ class StatsPage extends StatelessWidget {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 16),
-        // 固定图表区高度：柱高按当天完成数占 7 天峰值的比例缩放。
-        SizedBox(
-          height: _maxBarHeight + 46,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              for (int index = 0; index < trend.length; index++)
-                _buildBar(
-                  trend[index],
-                  index,
-                  maxCount,
-                  isToday: index == trend.length - 1,
-                ),
-            ],
-          ),
+        // 只固定柱子的绘制槽位，数字和星期标签由文字实际行高自然撑开。
+        // 桌面字体度量可能比预估稍高，不能再用“柱高 + 固定余量”限制整张图。
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            for (int index = 0; index < trend.length; index++)
+              _buildBar(
+                trend[index],
+                index,
+                maxCount,
+                isToday: index == trend.length - 1,
+              ),
+          ],
         ),
         const SizedBox(height: 8),
         const Text(
@@ -186,14 +184,20 @@ class StatsPage extends StatelessWidget {
             style: const TextStyle(fontSize: 11, color: Color(0xFF4F6F56)),
           ),
           const SizedBox(height: 4),
-          Container(
-            key: ValueKey<String>('trend-bar-$index'),
-            width: 18,
-            height: barHeight,
-            decoration: BoxDecoration(
-              color: entry.count == 0 ? _emptyBarColor : _barColor,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(4),
+          SizedBox(
+            height: _maxBarHeight,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Container(
+                key: ValueKey<String>('trend-bar-$index'),
+                width: 18,
+                height: barHeight,
+                decoration: BoxDecoration(
+                  color: entry.count == 0 ? _emptyBarColor : _barColor,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(4),
+                  ),
+                ),
               ),
             ),
           ),

@@ -923,6 +923,38 @@ void main() {
     expect(find.text('今天'), findsOneWidget);
   });
 
+  testWidgets('统计页柱状图在不同桌面窗口高度下不溢出', (WidgetTester tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    SharedPreferences.setMockInitialValues({
+      'tasks': jsonEncode([
+        {
+          'id': 'done-today',
+          'title': '今天完成',
+          'isDone': true,
+          'completedAtUtc': DateTime.now().toUtc().toIso8601String(),
+        },
+      ]),
+    });
+
+    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey<String>('stats-button')));
+    await tester.pumpAndSettle();
+
+    for (final double height in <double>[900, 640, 480]) {
+      await tester.binding.setSurfaceSize(Size(1280, height));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '桌面窗口高度 $height 不应触发 RenderFlex 溢出',
+      );
+      expect(find.byKey(const ValueKey<String>('trend-bar-6')), findsOneWidget);
+    }
+  });
+
   testWidgets('没有任务时统计页显示空态', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({'tasks': '[]'});
 

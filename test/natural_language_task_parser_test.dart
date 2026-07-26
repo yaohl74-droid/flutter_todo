@@ -97,6 +97,42 @@ void main() {
       );
     });
 
+    test('下个周、星期和礼拜按下一个自然周计算', () {
+      final DateTime monday = DateTime(2026, 7, 20, 9);
+      final Map<String, DateTime> cases = <String, DateTime>{
+        '下个周三评审': DateTime(2026, 7, 29, 23, 59),
+        '下个星期五交付': DateTime(2026, 7, 31, 23, 59),
+        '下个礼拜天复盘': DateTime(2026, 8, 2, 23, 59),
+      };
+
+      for (final MapEntry<String, DateTime> entry in cases.entries) {
+        expect(
+          parseNaturalLanguageTask(entry.key, now: monday)!.dueDate,
+          entry.value,
+          reason: entry.key,
+        );
+      }
+    });
+
+    test('上个等不支持的星期词整体拒绝，不降级成未来裸星期', () {
+      final DateTime monday = DateTime(2026, 7, 20, 9);
+      const List<String> inputs = <String>[
+        '上个周三复盘',
+        '上个星期三复盘',
+        '上个礼拜三复盘',
+        '这个礼拜三开会',
+        '每个星期三开会',
+      ];
+
+      for (final String input in inputs) {
+        expect(
+          parseNaturalLanguageTask(input, now: monday),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+
     test('今天的裸周几时间已过时推进七天', () {
       final ParsedTaskInput result = parseNaturalLanguageTask(
         '周三下午3点开会',

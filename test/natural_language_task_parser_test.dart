@@ -366,6 +366,18 @@ void main() {
       expect(parseNaturalLanguageTask('tomorrow meeting', now: now), isNull);
     });
 
+    test('日期加裸时段但无精确时刻时不解析', () {
+      const List<String> inputs = <String>['今天下午开会', '明天早上开会', '明天晚上聚餐'];
+
+      for (final String input in inputs) {
+        expect(
+          parseNaturalLanguageTask(input, now: now),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+
     test('明确排除的日期表达式整句不解析', () {
       const List<String> unsupported = <String>[
         '每周一开会',
@@ -418,9 +430,6 @@ void main() {
         '今天中午九点开会',
         '今天中午十二点三十分开会',
         '明早开会',
-        '明天早上开会',
-        '明天下午开会',
-        '明天晚上开会',
         '今晚开会',
         '明早上午九点开会',
       ];

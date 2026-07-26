@@ -66,6 +66,8 @@ final RegExp _periodTimePattern = RegExp(
   r'$',
 );
 
+final RegExp _bareTimePeriodPattern = RegExp(r'上午|早上|清早|下午|晚上|傍晚');
+
 final RegExp _pointTimePattern = RegExp(
   r'^(\d{1,3}|[零一二三四五六七八九十两]{1,4})点(.*)$',
 );
@@ -114,6 +116,14 @@ ParsedTaskInput? parseNaturalLanguageTask(
   final List<RegExpMatch> timeMatches = _timeCandidatePattern
       .allMatches(input)
       .toList();
+  final List<RegExpMatch> bareTimePeriodMatches = _bareTimePeriodPattern
+      .allMatches(input)
+      .where(
+        (periodMatch) => !timeMatches.any(
+          (timeMatch) => _matchesOverlap(periodMatch, timeMatch),
+        ),
+      )
+      .toList();
   if (dateMatches.length > 1 || timeMatches.length > 1) {
     return null;
   }
@@ -121,10 +131,6 @@ ParsedTaskInput? parseNaturalLanguageTask(
   final _ParsedDateToken? dateToken = dateMatches.isEmpty
       ? null
       : _parseDateToken(dateMatches.single);
-  if (dateToken?.period != null && timeMatches.isEmpty) {
-    // “明早/今晚/明晚”只有时段而没有精确小时，不猜一个默认时间。
-    return null;
-  }
 
   final ({int hour, int minute})? parsedTime = timeMatches.isEmpty
       ? null
@@ -133,6 +139,11 @@ ParsedTaskInput? parseNaturalLanguageTask(
           inheritedPeriod: dateToken?.period,
         );
   if (timeMatches.isNotEmpty && parsedTime == null) {
+    return null;
+  }
+  if (bareTimePeriodMatches.isNotEmpty ||
+      (dateToken?.period != null && parsedTime == null)) {
+    // 裸时段没有精确小时，不猜一个默认时间。
     return null;
   }
   if (dateToken == null && parsedTime == null) {
@@ -171,6 +182,9 @@ ParsedTaskInput? parseNaturalLanguageTask(
 
   return ParsedTaskInput(title: title, dueDate: dueDate);
 }
+
+bool _matchesOverlap(RegExpMatch first, RegExpMatch second) =>
+    first.start < second.end && second.start < first.end;
 
 _ParsedDateToken _parseDateToken(RegExpMatch match) {
   final String text = match.group(0)!;

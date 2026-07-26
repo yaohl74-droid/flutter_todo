@@ -324,6 +324,10 @@ void main() {
         '明早九点开会',
         now: now,
       )!;
+      final ParsedTaskInput explicitTomorrowMorning = parseNaturalLanguageTask(
+        '明天早上九点开会',
+        now: now,
+      )!;
       final ParsedTaskInput tonight = parseNaturalLanguageTask(
         '今晚8点聚餐',
         now: now,
@@ -335,6 +339,8 @@ void main() {
 
       expect(tomorrowMorning.title, '开会');
       expect(tomorrowMorning.dueDate, DateTime(2026, 7, 21, 9));
+      expect(explicitTomorrowMorning.title, '开会');
+      expect(explicitTomorrowMorning.dueDate, DateTime(2026, 7, 21, 9));
       expect(tonight.title, '聚餐');
       expect(tonight.dueDate, DateTime(2026, 7, 20, 20));
       expect(tomorrowEvening.title, '电影');
@@ -412,6 +418,9 @@ void main() {
         '今天中午九点开会',
         '今天中午十二点三十分开会',
         '明早开会',
+        '明天早上开会',
+        '明天下午开会',
+        '明天晚上开会',
         '今晚开会',
         '明早上午九点开会',
       ];

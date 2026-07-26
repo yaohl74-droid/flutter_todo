@@ -37,7 +37,7 @@ final RegExp _datePattern = RegExp(
   r'明早|今晚|明晚|'
   r'下(?:周|星期|礼拜)[一二三四五六日天]|'
   r'(?:周|星期|礼拜)[一二三四五六日天]|'
-  r'今天|明天|后天',
+  r'今天|明天|大后天|后天',
 );
 
 const String _chineseNumberCharacters = '零一二三四五六七八九十两';
@@ -384,6 +384,16 @@ DateTime _resolveDate(String? dateText, DateTime now, int hour, int minute) {
       dayAfterTomorrow.year,
       dayAfterTomorrow.month,
       dayAfterTomorrow.day,
+      hour,
+      minute,
+    );
+  }
+  if (dateText == '大后天') {
+    final DateTime threeDaysLater = today.add(const Duration(days: 3));
+    return DateTime(
+      threeDaysLater.year,
+      threeDaysLater.month,
+      threeDaysLater.day,
       hour,
       minute,
     );

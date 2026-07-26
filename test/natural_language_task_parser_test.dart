@@ -20,6 +20,22 @@ void main() {
       );
     });
 
+    test('大后天按三天后解析且不影响后天', () {
+      final ParsedTaskInput threeDaysLater = parseNaturalLanguageTask(
+        '大后天整理桌面',
+        now: now,
+      )!;
+      final ParsedTaskInput dayAfterTomorrow = parseNaturalLanguageTask(
+        '后天整理桌面',
+        now: now,
+      )!;
+
+      expect(threeDaysLater.title, '整理桌面');
+      expect(threeDaysLater.dueDate, DateTime(2026, 7, 23, 23, 59));
+      expect(dayAfterTomorrow.title, '整理桌面');
+      expect(dayAfterTomorrow.dueDate, DateTime(2026, 7, 22, 23, 59));
+    });
+
     test('明确写今天时保留已经过去的时间', () {
       final ParsedTaskInput result = parseNaturalLanguageTask(
         '今天下午3点复盘',

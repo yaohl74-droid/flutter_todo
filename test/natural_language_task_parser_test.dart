@@ -12,6 +12,7 @@ void main() {
         '月底结账',
         '3天后开会',
         '明早开会',
+        '聽朝开会',
       ]) {
         expect(hasUnsupportedTimeExpression(input), isTrue, reason: input);
       }
@@ -65,6 +66,26 @@ void main() {
       expect(threeDaysLater.dueDate, DateTime(2026, 7, 23, 23, 59));
       expect(dayAfterTomorrow.title, '整理桌面');
       expect(dayAfterTomorrow.dueDate, DateTime(2026, 7, 22, 23, 59));
+    });
+
+    test('书面、繁体和粤语日期别名保留原文偏移并正确归一化', () {
+      final Map<String, ({String title, DateTime dueDate})> cases =
+          <String, ({String title, DateTime dueDate})>{
+            '明日交房租': (title: '交房租', dueDate: DateTime(2026, 7, 21, 23, 59)),
+            '聽日交房租': (title: '交房租', dueDate: DateTime(2026, 7, 21, 23, 59)),
+            '後天交房租': (title: '交房租', dueDate: DateTime(2026, 7, 22, 23, 59)),
+            '聽朝九点开会': (title: '开会', dueDate: DateTime(2026, 7, 21, 9)),
+          };
+
+      for (final MapEntry<String, ({String title, DateTime dueDate})> entry
+          in cases.entries) {
+        final ParsedTaskInput result = parseNaturalLanguageTask(
+          entry.key,
+          now: now,
+        )!;
+        expect(result.title, entry.value.title, reason: entry.key);
+        expect(result.dueDate, entry.value.dueDate, reason: entry.key);
+      }
     });
 
     test('明确写今天时保留已经过去的时间', () {
@@ -189,6 +210,50 @@ void main() {
           parseNaturalLanguageTask(entry.key, now: monday)!.dueDate,
           entry.value,
           reason: entry.key,
+        );
+      }
+    });
+
+    test('繁体星期与量词别名按同一星期规则归一化', () {
+      final DateTime monday = DateTime(2026, 7, 20, 9);
+      final Map<String, ({String title, DateTime dueDate})> cases =
+          <String, ({String title, DateTime dueDate})>{
+            '週三体检': (title: '体检', dueDate: DateTime(2026, 7, 22, 23, 59)),
+            '禮拜五交周报': (title: '交周报', dueDate: DateTime(2026, 7, 24, 23, 59)),
+            '下週三评审': (title: '评审', dueDate: DateTime(2026, 7, 29, 23, 59)),
+            '下個禮拜三开会': (title: '开会', dueDate: DateTime(2026, 7, 29, 23, 59)),
+          };
+
+      for (final MapEntry<String, ({String title, DateTime dueDate})> entry
+          in cases.entries) {
+        final ParsedTaskInput result = parseNaturalLanguageTask(
+          entry.key,
+          now: monday,
+        )!;
+        expect(result.title, entry.value.title, reason: entry.key);
+        expect(result.dueDate, entry.value.dueDate, reason: entry.key);
+      }
+    });
+
+    test('繁体重复与过去星期表达整体拒绝，不降级成一次性任务', () {
+      final DateTime monday = DateTime(2026, 7, 20, 9);
+      const List<String> inputs = <String>[
+        '每週一开会',
+        '每禮拜一开会',
+        '上週三复盘',
+        '上個禮拜三复盘',
+        '这週三开会',
+        '這個禮拜三开会',
+        '下下週一开会',
+        '每個禮拜三开会',
+      ];
+
+      for (final String input in inputs) {
+        expect(hasUnsupportedTimeExpression(input), isTrue, reason: input);
+        expect(
+          parseNaturalLanguageTask(input, now: monday),
+          isNull,
+          reason: input,
         );
       }
     });

@@ -51,8 +51,8 @@ const String _relativeMonthDateTextPattern =
 
 final RegExp _unsupportedDatePattern = RegExp(
   r'每(?:天|日|晚|早|年|个?月)|'
-  r'(?:每|本|上|这)(?:个)?(?:周|星期|礼拜)(?:[一二三四五六日天])?|'
-  r'下下(?:个)?(?:周|星期|礼拜)(?:[一二三四五六日天])?|'
+  r'(?:每|本|上|这|這)(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?|'
+  r'下下(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?|'
   '月初|月底|'
   r'\d+(?:天|周|星期|礼拜|个月|月)后',
 );
@@ -64,10 +64,10 @@ final RegExp _unsupportedTimePeriodPattern = RegExp(
 final RegExp _datePattern = RegExp(
   '$_relativeMonthDateTextPattern|'
   '$_absoluteDateTextPattern|'
-  r'明早|今晚|明晚|'
-  r'下(?:个)?(?:周|星期|礼拜)[一二三四五六日天]|'
-  r'(?:周|星期|礼拜)[一二三四五六日天]|'
-  r'今天|明天|大后天|后天',
+  r'明早|聽朝|今晚|明晚|'
+  r'下(?:个|個)?(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
+  r'(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
+  r'今天|明天|明日|聽日|大后天|后天|後天',
 );
 
 final RegExp _relativeMonthDatePattern = RegExp(
@@ -130,7 +130,7 @@ bool hasUnsupportedTimeExpression(String input) {
         ),
       );
   final bool hasBareRelativePeriod =
-      timeMatches.isEmpty && RegExp(r'明早|今晚|明晚').hasMatch(input);
+      timeMatches.isEmpty && RegExp(r'明早|聽朝|今晚|明晚').hasMatch(input);
   return hasBareTimePeriod || hasBareRelativePeriod;
 }
 
@@ -308,11 +308,13 @@ _ParsedDateToken? _parseDateToken(RegExpMatch match) {
   }
 
   return switch (text) {
-    '明早' => _ParsedDateToken(
+    '明早' || '聽朝' => _ParsedDateToken(
       match: match,
       canonicalText: '明天',
       period: _TimePeriod.morning,
     ),
+    '明日' || '聽日' => _ParsedDateToken(match: match, canonicalText: '明天'),
+    '後天' => _ParsedDateToken(match: match, canonicalText: '后天'),
     '今晚' => _ParsedDateToken(
       match: match,
       canonicalText: '今天',
@@ -329,8 +331,10 @@ _ParsedDateToken? _parseDateToken(RegExpMatch match) {
     ),
     _
         when text.startsWith('周') ||
+            text.startsWith('週') ||
             text.startsWith('星期') ||
-            text.startsWith('礼拜') =>
+            text.startsWith('礼拜') ||
+            text.startsWith('禮拜') =>
       _ParsedDateToken(
         match: match,
         canonicalText: '周${_canonicalWeekday(text)}',

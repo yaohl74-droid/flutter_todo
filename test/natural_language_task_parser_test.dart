@@ -438,6 +438,25 @@ void main() {
       }
     });
 
+    test('中文数字绝对日期整句不解析', () {
+      const List<String> inputs = <String>[
+        '三月一号交房租',
+        '二月十五号交周报',
+        '三月一号上午9点30分面试',
+        '十二月三十一号复盘',
+        '2015年3月3号开会',
+        '二零一五年三月三號纪念',
+      ];
+
+      for (final String input in inputs) {
+        expect(
+          parseNaturalLanguageTask(input, now: now),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+
     test('明确排除的日期表达式整句不解析', () {
       const List<String> unsupported = <String>[
         '每周一开会',

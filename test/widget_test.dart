@@ -170,7 +170,7 @@ void main() {
     expect(scheduler.permissionRequestCount, 0);
   });
 
-  testWidgets('无法解析时保留整句并且不设置截止时间', (WidgetTester tester) async {
+  testWidgets('明确拒绝时保留整句、无期限添加并提示用户', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
@@ -179,6 +179,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('每周一开会'), findsOneWidget);
+    expect(find.text('该时间表达暂不支持，已按无期限任务添加'), findsOneWidget);
     final SharedPreferences preferences = await SharedPreferences.getInstance();
     final List<dynamic> savedTasks =
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;

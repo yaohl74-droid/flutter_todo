@@ -135,6 +135,8 @@ class _TodoPageState extends State<TodoPage> {
     // 一次提交只读取一次当前时间，保证相对日期解析与提醒资格判断一致。
     final DateTime now = DateTime.now();
     final ParsedTaskInput? parsed = parseNaturalLanguageTask(input, now: now);
+    final bool explicitlyUnsupported =
+        parsed == null && hasUnsupportedTimeExpression(input);
     final String title = parsed?.title ?? input;
     if (title.trim().isEmpty) {
       return;
@@ -177,9 +179,11 @@ class _TodoPageState extends State<TodoPage> {
       _selectedDueDate = null;
       _selectedReminderEnabled = false;
     });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('已添加')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(explicitlyUnsupported ? '该时间表达暂不支持，已按无期限任务添加' : '已添加'),
+      ),
+    );
 
     if (permissionDenied) {
       await _showNotificationPermissionDialog();

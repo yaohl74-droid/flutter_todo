@@ -2,6 +2,37 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:my_todo/utils/natural_language_task_parser.dart';
 
 void main() {
+  group('明确拒绝 vs 未识别', () {
+    test('明确拒绝的表达返回 true', () {
+      for (final String input in <String>[
+        '每天晚上8点吃药',
+        '每周一开会',
+        '三月一号交房租',
+        '2月15号体检',
+        '这个礼拜三开会',
+        '下下周一开会',
+        '月底结账',
+        '3天后开会',
+        '明早开会',
+      ]) {
+        expect(hasUnsupportedTimeExpression(input), isTrue, reason: input);
+      }
+    });
+
+    test('未识别和正常可解析的表达返回 false', () {
+      for (final String input in <String>[
+        '整理会议记录',
+        '买牛奶',
+        '明天下午3点开会',
+        '明早九点开会',
+        '周三体检',
+        '三天后交周报',
+      ]) {
+        expect(hasUnsupportedTimeExpression(input), isFalse, reason: input);
+      }
+    });
+  });
+
   group('相对日期', () {
     final DateTime now = DateTime(2026, 7, 20, 12, 34, 56);
 

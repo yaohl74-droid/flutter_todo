@@ -71,6 +71,33 @@ final RegExp _periodTimePattern = RegExp(
 
 final RegExp _bareTimePeriodPattern = RegExp(r'上午|早上|清早|下午|晚上|傍晚');
 
+/// 输入是否含有**明确列为不支持**的时间表达（重复任务、绝对日期、
+/// 方向不明的星期词、裸时段无时刻）。
+///
+/// 与「没有任何时间表达」不同：后者只是没识别到，前者是解析器**认识它、
+/// 并有意拒绝**。两者在 [parseNaturalLanguageTask] 里都返回 null，
+/// 调用方若要区分二者（给用户提示、或决定要不要走别的解析途径），用这个。
+bool hasUnsupportedTimeExpression(String input) {
+  if (_unsupportedDatePattern.hasMatch(input) ||
+      _unsupportedTimePeriodPattern.hasMatch(input)) {
+    return true;
+  }
+
+  final List<RegExpMatch> timeMatches = _timeCandidatePattern
+      .allMatches(input)
+      .toList();
+  final bool hasBareTimePeriod = _bareTimePeriodPattern
+      .allMatches(input)
+      .any(
+        (periodMatch) => !timeMatches.any(
+          (timeMatch) => _matchesOverlap(periodMatch, timeMatch),
+        ),
+      );
+  final bool hasBareRelativePeriod =
+      timeMatches.isEmpty && RegExp(r'明早|今晚|明晚').hasMatch(input);
+  return hasBareTimePeriod || hasBareRelativePeriod;
+}
+
 final RegExp _pointTimePattern = RegExp(
   r'^(\d{1,3}|[零一二三四五六七八九十两]{1,4})点(.*)$',
 );
@@ -110,8 +137,7 @@ ParsedTaskInput? parseNaturalLanguageTask(
   String input, {
   required DateTime now,
 }) {
-  if (_unsupportedDatePattern.hasMatch(input) ||
-      _unsupportedTimePeriodPattern.hasMatch(input)) {
+  if (hasUnsupportedTimeExpression(input)) {
     return null;
   }
 

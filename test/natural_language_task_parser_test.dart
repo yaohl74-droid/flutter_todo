@@ -420,6 +420,24 @@ void main() {
       }
     });
 
+    test('重复语义不能被丢弃后当成一次性任务', () {
+      const List<String> inputs = <String>[
+        '每天晚上8点吃药',
+        '每晚8点吃药',
+        '每日上午9点打卡',
+        '每月15号交房租',
+        '每年3月1号体检',
+      ];
+
+      for (final String input in inputs) {
+        expect(
+          parseNaturalLanguageTask(input, now: now),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+
     test('明确排除的日期表达式整句不解析', () {
       const List<String> unsupported = <String>[
         '每周一开会',

@@ -68,6 +68,24 @@ void main() {
       expect(dayAfterTomorrow.dueDate, DateTime(2026, 7, 22, 23, 59));
     });
 
+    test('较长日期别名必须整体匹配，不能从内部降级成较短日期', () {
+      final Map<String, DateTime> cases = <String, DateTime>{
+        '大后天': DateTime(2026, 7, 23, 23, 59),
+        '大後天': DateTime(2026, 7, 23, 23, 59),
+        '大後日': DateTime(2026, 7, 23, 23, 59),
+        '後日': DateTime(2026, 7, 22, 23, 59),
+      };
+
+      for (final MapEntry<String, DateTime> entry in cases.entries) {
+        final ParsedTaskInput result = parseNaturalLanguageTask(
+          '${entry.key}交周报',
+          now: now,
+        )!;
+        expect(result.title, '交周报', reason: entry.key);
+        expect(result.dueDate, entry.value, reason: entry.key);
+      }
+    });
+
     test('书面、繁体和粤语日期别名保留原文偏移并正确归一化', () {
       final Map<String, ({String title, DateTime dueDate})> cases =
           <String, ({String title, DateTime dueDate})>{

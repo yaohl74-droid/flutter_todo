@@ -67,7 +67,7 @@ final RegExp _datePattern = RegExp(
   r'明早|聽朝|今晚|明晚|'
   r'下(?:个|個)?(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
   r'(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
-  r'今天|明天|明日|聽日|大后天|后天|後天',
+  r'今天|明天|明日|聽日|大后天|大後天|大後日|后天|後天|後日',
 );
 
 final RegExp _relativeMonthDatePattern = RegExp(
@@ -314,7 +314,8 @@ _ParsedDateToken? _parseDateToken(RegExpMatch match) {
       period: _TimePeriod.morning,
     ),
     '明日' || '聽日' => _ParsedDateToken(match: match, canonicalText: '明天'),
-    '後天' => _ParsedDateToken(match: match, canonicalText: '后天'),
+    '後天' || '後日' => _ParsedDateToken(match: match, canonicalText: '后天'),
+    '大後天' || '大後日' => _ParsedDateToken(match: match, canonicalText: '大后天'),
     '今晚' => _ParsedDateToken(
       match: match,
       canonicalText: '今天',

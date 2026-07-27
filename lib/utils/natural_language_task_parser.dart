@@ -113,10 +113,24 @@ final RegExp _bareTimePeriodPattern = RegExp(r'上午|早上|清早|下午|晚�
 /// 与「没有任何时间表达」不同：后者只是没识别到，前者是解析器**认识它、
 /// 并有意拒绝**。两者在 [parseNaturalLanguageTask] 里都返回 null，
 /// 调用方若要区分二者（给用户提示、或决定要不要走别的解析途径），用这个。
-bool hasUnsupportedTimeExpression(String input) {
-  if (_unsupportedDatePattern.hasMatch(input) ||
-      _unsupportedTimePeriodPattern.hasMatch(input)) {
-    return true;
+bool hasUnsupportedTimeExpression(String input) =>
+    earlyRejectionOf(input) != null;
+
+/// 在做任何日期计算之前就能判定的拒绝原因；不需要 `now`。
+///
+/// [hasUnsupportedTimeExpression] 与 [parseNaturalLanguageTaskDetailed] **都从
+/// 这里取结论**，不各自判断一遍。曾经两处各写一份，结果是「明早开会」在一处
+/// 被拦下、在另一处被归错类——**同一个判断存在两份实现，迟早会漂移**。
+ParseRejection? earlyRejectionOf(String input) {
+  // 顺序有意义：重复语义优先于「写法不支持」，因为前者换任何解析器都无解。
+  if (_recurringPattern.hasMatch(input)) {
+    return ParseRejection.recurring;
+  }
+  if (_unsupportedDatePattern.hasMatch(input)) {
+    return ParseRejection.unsupportedDateForm;
+  }
+  if (_unsupportedTimePeriodPattern.hasMatch(input)) {
+    return ParseRejection.unsupportedTimeForm;
   }
 
   final List<RegExpMatch> timeMatches = _timeCandidatePattern
@@ -131,7 +145,10 @@ bool hasUnsupportedTimeExpression(String input) {
       );
   final bool hasBareRelativePeriod =
       timeMatches.isEmpty && RegExp(r'明早|聽朝|今晚|明晚').hasMatch(input);
-  return hasBareTimePeriod || hasBareRelativePeriod;
+  if (hasBareTimePeriod || hasBareRelativePeriod) {
+    return ParseRejection.bareTimePeriod;
+  }
+  return null;
 }
 
 final RegExp _pointTimePattern = RegExp(
@@ -240,13 +257,9 @@ ParseOutcome parseNaturalLanguageTaskDetailed(
   String input, {
   required DateTime now,
 }) {
-  if (hasUnsupportedTimeExpression(input)) {
-    return (
-      task: null,
-      reason: _recurringPattern.hasMatch(input)
-          ? ParseRejection.recurring
-          : ParseRejection.unsupportedDateForm,
-    );
+  final ParseRejection? early = earlyRejectionOf(input);
+  if (early != null) {
+    return (task: null, reason: early);
   }
 
   final List<RegExpMatch> dateMatches = _datePattern.allMatches(input).toList();

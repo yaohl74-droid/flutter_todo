@@ -86,6 +86,48 @@ void main() {
       }
     });
 
+    test('日期词必须整词匹配,不得残留前缀', () {
+      const List<String> words = <String>[
+        '今天',
+        '明天',
+        '明日',
+        '聽日',
+        '大后天',
+        '大後天',
+        '大後日',
+        '后天',
+        '後天',
+        '後日',
+        '週三',
+        '禮拜五',
+        '下週三',
+        '下個禮拜三',
+      ];
+      for (final String word in words) {
+        final ParsedTaskInput? result = parseNaturalLanguageTask(
+          '$word交周报',
+          now: now,
+        );
+        expect(result, isNotNull, reason: word);
+        expect(result!.title, '交周报', reason: '$word 残留了前缀');
+      }
+
+      const Map<String, String> relativePeriods = <String, String>{
+        '明早': '明早九点交周报',
+        '聽朝': '聽朝九点交周报',
+        '今晚': '今晚8点交周报',
+        '明晚': '明晚8点交周报',
+      };
+      for (final MapEntry<String, String> entry in relativePeriods.entries) {
+        final ParsedTaskInput? result = parseNaturalLanguageTask(
+          entry.value,
+          now: now,
+        );
+        expect(result, isNotNull, reason: entry.key);
+        expect(result!.title, '交周报', reason: '${entry.key} 残留了前缀');
+      }
+    });
+
     test('书面、繁体和粤语日期别名保留原文偏移并正确归一化', () {
       final Map<String, ({String title, DateTime dueDate})> cases =
           <String, ({String title, DateTime dueDate})>{

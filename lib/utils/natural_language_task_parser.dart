@@ -8,27 +8,52 @@ class ParsedTaskInput {
 
 enum _TimePeriod { morning, afternoon, evening }
 
+class _ParsedCalendarDate {
+  const _ParsedCalendarDate({
+    required this.day,
+    this.year,
+    this.month,
+    this.monthOffset,
+  });
+
+  final int day;
+  final int? year;
+  final int? month;
+  final int? monthOffset;
+}
+
 class _ParsedDateToken {
   const _ParsedDateToken({
     required this.match,
     required this.canonicalText,
     this.period,
+    this.calendarDate,
   });
 
   final RegExpMatch match;
   final String canonicalText;
   final _TimePeriod? period;
+  final _ParsedCalendarDate? calendarDate;
 
-  bool get isBareWeekday => canonicalText.startsWith('周');
+  bool get isBareWeekday =>
+      calendarDate == null && canonicalText.startsWith('周');
 }
+
+const String _chineseNumberCharacters = '零一二三四五六七八九十两';
+const String _calendarNumberPattern =
+    '(?:\\d{1,2}|[$_chineseNumberCharacters]{1,3})';
+const String _calendarYearPattern = '(?:\\d{4}|[零一二三四五六七八九]{4})';
+const String _absoluteDateTextPattern =
+    '(?:$_calendarYearPattern年)?'
+    '$_calendarNumberPattern月$_calendarNumberPattern[日号號]';
+const String _relativeMonthDateTextPattern =
+    '(?:下(?:个)?月|这个月|本月)$_calendarNumberPattern[日号號]';
 
 final RegExp _unsupportedDatePattern = RegExp(
   r'每(?:天|日|晚|早|年|个?月)|'
   r'(?:每|本|上|这)(?:个)?(?:周|星期|礼拜)(?:[一二三四五六日天])?|'
   r'下下(?:个)?(?:周|星期|礼拜)(?:[一二三四五六日天])?|'
   '月初|月底|'
-  '(?:\\d{1,2}|[$_chineseNumberCharacters]{1,3})月'
-  '(?:\\d{1,2}|[$_chineseNumberCharacters]{1,3})[日号號]|'
   r'\d+(?:天|周|星期|礼拜|个月|月)后',
 );
 
@@ -37,13 +62,24 @@ final RegExp _unsupportedTimePeriodPattern = RegExp(
 );
 
 final RegExp _datePattern = RegExp(
+  '$_relativeMonthDateTextPattern|'
+  '$_absoluteDateTextPattern|'
   r'明早|今晚|明晚|'
   r'下(?:个)?(?:周|星期|礼拜)[一二三四五六日天]|'
   r'(?:周|星期|礼拜)[一二三四五六日天]|'
   r'今天|明天|大后天|后天',
 );
 
-const String _chineseNumberCharacters = '零一二三四五六七八九十两';
+final RegExp _relativeMonthDatePattern = RegExp(
+  '^(下(?:个)?月|这个月|本月)'
+  '($_calendarNumberPattern)[日号號]\$',
+);
+
+final RegExp _absoluteDatePattern = RegExp(
+  '^(?:($_calendarYearPattern)年)?'
+  '($_calendarNumberPattern)月'
+  '($_calendarNumberPattern)[日号號]\$',
+);
 
 // 用宽模式先吃掉完整的“时间候选”，再由结构化解析校验支持范围。
 // 这样“九点三十分”等未支持格式不会被部分截成“九点”。
@@ -71,7 +107,7 @@ final RegExp _periodTimePattern = RegExp(
 
 final RegExp _bareTimePeriodPattern = RegExp(r'上午|早上|清早|下午|晚上|傍晚');
 
-/// 输入是否含有**明确列为不支持**的时间表达（重复任务、绝对日期、
+/// 输入是否含有**明确列为不支持**的时间表达（重复任务、模糊日期、
 /// 方向不明的星期词、裸时段无时刻）。
 ///
 /// 与「没有任何时间表达」不同：后者只是没识别到，前者是解析器**认识它、
@@ -111,6 +147,20 @@ const Map<String, int> _weekdayByText = <String, int>{
   '六': DateTime.saturday,
   '日': DateTime.sunday,
   '天': DateTime.sunday,
+};
+
+const Map<String, int> _chineseDigitValues = <String, int>{
+  '零': 0,
+  '一': 1,
+  '二': 2,
+  '两': 2,
+  '三': 3,
+  '四': 4,
+  '五': 5,
+  '六': 6,
+  '七': 7,
+  '八': 8,
+  '九': 9,
 };
 
 const Map<String, int> _chineseHourByText = <String, int>{
@@ -160,6 +210,9 @@ ParsedTaskInput? parseNaturalLanguageTask(
   final _ParsedDateToken? dateToken = dateMatches.isEmpty
       ? null
       : _parseDateToken(dateMatches.single);
+  if (dateMatches.isNotEmpty && dateToken == null) {
+    return null;
+  }
 
   final ({int hour, int minute})? parsedTime = timeMatches.isEmpty
       ? null
@@ -182,12 +235,15 @@ ParsedTaskInput? parseNaturalLanguageTask(
   final DateTime localNow = now.toLocal();
   final ({int hour, int minute}) effectiveTime =
       parsedTime ?? (hour: 23, minute: 59);
-  DateTime dueDate = _resolveDate(
-    dateToken?.canonicalText,
+  DateTime? dueDate = _resolveDate(
+    dateToken,
     localNow,
     effectiveTime.hour,
     effectiveTime.minute,
   );
+  if (dueDate == null) {
+    return null;
+  }
 
   // 只写时间时默认取下一次到来的该时间，避免新建一个已经过期的任务。
   if (dateToken == null && !dueDate.isAfter(localNow)) {
@@ -215,8 +271,42 @@ ParsedTaskInput? parseNaturalLanguageTask(
 bool _matchesOverlap(RegExpMatch first, RegExpMatch second) =>
     first.start < second.end && second.start < first.end;
 
-_ParsedDateToken _parseDateToken(RegExpMatch match) {
+_ParsedDateToken? _parseDateToken(RegExpMatch match) {
   final String text = match.group(0)!;
+  final RegExpMatch? relativeMonthMatch = _relativeMonthDatePattern.firstMatch(
+    text,
+  );
+  if (relativeMonthMatch != null) {
+    final int? day = _parseCalendarNumber(relativeMonthMatch.group(2)!);
+    if (day == null) {
+      return null;
+    }
+    return _ParsedDateToken(
+      match: match,
+      canonicalText: text,
+      calendarDate: _ParsedCalendarDate(
+        day: day,
+        monthOffset: relativeMonthMatch.group(1)!.startsWith('下') ? 1 : 0,
+      ),
+    );
+  }
+
+  final RegExpMatch? absoluteMatch = _absoluteDatePattern.firstMatch(text);
+  if (absoluteMatch != null) {
+    final String? yearText = absoluteMatch.group(1);
+    final int? year = yearText == null ? null : _parseCalendarYear(yearText);
+    final int? month = _parseCalendarNumber(absoluteMatch.group(2)!);
+    final int? day = _parseCalendarNumber(absoluteMatch.group(3)!);
+    if ((yearText != null && year == null) || month == null || day == null) {
+      return null;
+    }
+    return _ParsedDateToken(
+      match: match,
+      canonicalText: text,
+      calendarDate: _ParsedCalendarDate(year: year, month: month, day: day),
+    );
+  }
+
   return switch (text) {
     '明早' => _ParsedDateToken(
       match: match,
@@ -247,6 +337,47 @@ _ParsedDateToken _parseDateToken(RegExpMatch match) {
       ),
     _ => _ParsedDateToken(match: match, canonicalText: text),
   };
+}
+
+int? _parseCalendarNumber(String text) {
+  if (_isArabicNumber(text)) {
+    return int.parse(text);
+  }
+  if (text.length == 1) {
+    return _chineseDigitValues[text];
+  }
+
+  final int firstTen = text.indexOf('十');
+  if (firstTen < 0 || firstTen != text.lastIndexOf('十')) {
+    return null;
+  }
+  final String tensText = text.substring(0, firstTen);
+  final String onesText = text.substring(firstTen + 1);
+  final int? tens = tensText.isEmpty ? 1 : _chineseDigitValues[tensText];
+  final int? ones = onesText.isEmpty ? 0 : _chineseDigitValues[onesText];
+  if (tens == null || ones == null || tens == 0) {
+    return null;
+  }
+  return tens * 10 + ones;
+}
+
+int? _parseCalendarYear(String text) {
+  if (_isArabicNumber(text)) {
+    return int.parse(text);
+  }
+  if (text.length != 4) {
+    return null;
+  }
+
+  int year = 0;
+  for (final int codeUnit in text.codeUnits) {
+    final int? digit = _chineseDigitValues[String.fromCharCode(codeUnit)];
+    if (digit == null) {
+      return null;
+    }
+    year = year * 10 + digit;
+  }
+  return year;
 }
 
 String _canonicalWeekday(String text) {
@@ -412,7 +543,18 @@ int? _parseMinuteSuffix(String text) {
 
 bool _isArabicNumber(String text) => RegExp(r'^\d+$').hasMatch(text);
 
-DateTime _resolveDate(String? dateText, DateTime now, int hour, int minute) {
+DateTime? _resolveDate(
+  _ParsedDateToken? dateToken,
+  DateTime now,
+  int hour,
+  int minute,
+) {
+  final _ParsedCalendarDate? calendarDate = dateToken?.calendarDate;
+  if (calendarDate != null) {
+    return _resolveCalendarDate(calendarDate, now, hour, minute);
+  }
+
+  final String? dateText = dateToken?.canonicalText;
   final DateTime today = DateTime(now.year, now.month, now.day);
   if (dateText == null || dateText == '今天') {
     return DateTime(today.year, today.month, today.day, hour, minute);
@@ -457,4 +599,59 @@ DateTime _resolveDate(String? dateText, DateTime now, int hour, int minute) {
     hour,
     minute,
   );
+}
+
+DateTime? _resolveCalendarDate(
+  _ParsedCalendarDate date,
+  DateTime now,
+  int hour,
+  int minute,
+) {
+  final int? monthOffset = date.monthOffset;
+  if (monthOffset != null) {
+    final int zeroBasedMonth = now.month - 1 + monthOffset;
+    final int year = now.year + zeroBasedMonth ~/ DateTime.monthsPerYear;
+    final int month = zeroBasedMonth % DateTime.monthsPerYear + 1;
+    return _validCalendarDate(year, month, date.day, hour, minute);
+  }
+
+  final int month = date.month!;
+  final int? explicitYear = date.year;
+  if (explicitYear != null) {
+    return _validCalendarDate(explicitYear, month, date.day, hour, minute);
+  }
+
+  final DateTime? thisYear = _validCalendarDate(
+    now.year,
+    month,
+    date.day,
+    hour,
+    minute,
+  );
+  if (thisYear == null || thisYear.isAfter(now)) {
+    return thisYear;
+  }
+  return _validCalendarDate(now.year + 1, month, date.day, hour, minute);
+}
+
+DateTime? _validCalendarDate(
+  int year,
+  int month,
+  int day,
+  int hour,
+  int minute,
+) {
+  if (year < 1 || month < 1 || month > DateTime.monthsPerYear || day < 1) {
+    return null;
+  }
+  final DateTime firstDayOfNextMonth = month == DateTime.monthsPerYear
+      ? DateTime(year + 1)
+      : DateTime(year, month + 1);
+  final int daysInMonth = firstDayOfNextMonth
+      .subtract(const Duration(days: 1))
+      .day;
+  if (day > daysInMonth) {
+    return null;
+  }
+  return DateTime(year, month, day, hour, minute);
 }

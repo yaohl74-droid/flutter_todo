@@ -7,8 +7,6 @@ void main() {
       for (final String input in <String>[
         '每天晚上8点吃药',
         '每周一开会',
-        '三月一号交房租',
-        '2月15号体检',
         '这个礼拜三开会',
         '下下周一开会',
         '月底结账',
@@ -27,6 +25,8 @@ void main() {
         '明早九点开会',
         '周三体检',
         '三天后交周报',
+        '三月一号交房租',
+        '2月15号体检',
       ]) {
         expect(hasUnsupportedTimeExpression(input), isFalse, reason: input);
       }
@@ -425,6 +425,104 @@ void main() {
     });
   });
 
+  group('绝对日期', () {
+    final DateTime now = DateTime(2026, 2, 12, 9);
+
+    test('支持阿拉伯和中文月日，并剥离日期标题', () {
+      final Map<String, ({String title, DateTime dueDate})> cases =
+          <String, ({String title, DateTime dueDate})>{
+            '2月15号体检': (title: '体检', dueDate: DateTime(2026, 2, 15, 23, 59)),
+            '三月一号交房租': (title: '交房租', dueDate: DateTime(2026, 3, 1, 23, 59)),
+            '二月十五号交周报': (title: '交周报', dueDate: DateTime(2026, 2, 15, 23, 59)),
+            '十二月三十一号复盘': (title: '复盘', dueDate: DateTime(2026, 12, 31, 23, 59)),
+          };
+
+      for (final MapEntry<String, ({String title, DateTime dueDate})> entry
+          in cases.entries) {
+        final ParsedTaskInput result = parseNaturalLanguageTask(
+          entry.key,
+          now: now,
+        )!;
+        expect(result.title, entry.value.title, reason: entry.key);
+        expect(result.dueDate, entry.value.dueDate, reason: entry.key);
+      }
+    });
+
+    test('明确年份按用户指定，即使日期已经过去', () {
+      final ParsedTaskInput arabic = parseNaturalLanguageTask(
+        '2027年3月3号面试',
+        now: now,
+      )!;
+      final ParsedTaskInput chinese = parseNaturalLanguageTask(
+        '二零一五年三月三號纪念',
+        now: now,
+      )!;
+
+      expect(arabic.title, '面试');
+      expect(arabic.dueDate, DateTime(2027, 3, 3, 23, 59));
+      expect(chinese.title, '纪念');
+      expect(chinese.dueDate, DateTime(2015, 3, 3, 23, 59));
+    });
+
+    test('相对月份按当前月份推算', () {
+      final Map<String, DateTime> cases = <String, DateTime>{
+        '下个月20号交房租': DateTime(2026, 3, 20, 23, 59),
+        '这个月5号复盘': DateTime(2026, 2, 5, 23, 59),
+        '本月15号结账': DateTime(2026, 2, 15, 23, 59),
+      };
+
+      for (final MapEntry<String, DateTime> entry in cases.entries) {
+        expect(
+          parseNaturalLanguageTask(entry.key, now: now)!.dueDate,
+          entry.value,
+          reason: entry.key,
+        );
+      }
+    });
+
+    test('绝对日期与时刻沿用现有组合解析', () {
+      final ParsedTaskInput result = parseNaturalLanguageTask(
+        '三月一号上午9点30分面试',
+        now: now,
+      )!;
+
+      expect(result.title, '面试');
+      expect(result.dueDate, DateTime(2026, 3, 1, 9, 30));
+    });
+
+    test('未写年份且今年该时刻已过时顺延到明年', () {
+      final ParsedTaskInput result = parseNaturalLanguageTask(
+        '一月五号复盘',
+        now: now,
+      )!;
+
+      expect(result.title, '复盘');
+      expect(result.dueDate, DateTime(2027, 1, 5, 23, 59));
+    });
+
+    test('非法日期不依赖 DateTime 溢出归一化', () {
+      for (final String input in <String>[
+        '2月30号开会',
+        '13月1号开会',
+        '2027年2月29号开会',
+      ]) {
+        expect(
+          parseNaturalLanguageTask(input, now: now),
+          isNull,
+          reason: input,
+        );
+      }
+      expect(
+        parseNaturalLanguageTask('2024年2月29号纪念', now: now)!.dueDate,
+        DateTime(2024, 2, 29, 23, 59),
+      );
+    });
+
+    test('多个绝对日期候选不猜测', () {
+      expect(parseNaturalLanguageTask('2月15号3月1号开会', now: now), isNull);
+    });
+  });
+
   group('保守失败', () {
     final DateTime now = DateTime(2026, 7, 20, 9);
 
@@ -469,32 +567,11 @@ void main() {
       }
     });
 
-    test('中文数字绝对日期整句不解析', () {
-      const List<String> inputs = <String>[
-        '三月一号交房租',
-        '二月十五号交周报',
-        '三月一号上午9点30分面试',
-        '十二月三十一号复盘',
-        '2015年3月3号开会',
-        '二零一五年三月三號纪念',
-      ];
-
-      for (final String input in inputs) {
-        expect(
-          parseNaturalLanguageTask(input, now: now),
-          isNull,
-          reason: input,
-        );
-      }
-    });
-
     test('明确排除的日期表达式整句不解析', () {
       const List<String> unsupported = <String>[
         '每周一开会',
         '月底结账',
         '月初复盘',
-        '3月5号开会',
-        '3月5日开会',
         '3天后开会',
         '本周一开会',
         '上周一复盘',

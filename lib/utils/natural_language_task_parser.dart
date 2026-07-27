@@ -179,16 +179,74 @@ const Map<String, int> _chineseHourByText = <String, int>{
   '十二': 12,
 };
 
+/// 解析失败的原因。
+///
+/// 解析器有多处返回 null，但语义各不相同：有的是「没识别到」，有的是
+/// 「识别到了但有意拒绝」，还有的是「信息本身就不足」。调用方若把它们
+/// 一律当成「不知道」，就会做出错误决策——例如把一句根本没有时间表达的
+/// 输入送去问模型，白付延迟、成本和隐私。
+///
+/// 这些取值由 [parseNaturalLanguageTaskDetailed] 与主解析路径**共用同一段
+/// 代码**产出，不是在外部重新判断一遍——那样两边一定会随版本漂移。
+enum ParseRejection {
+  /// 解析成功。
+  none,
+
+  /// 重复任务（每天/每周/每月…）。数据模型只有单个截止时间，装不下。
+  recurring,
+
+  /// 日期写法不受支持（`月底`、`下下周三`…）。语义本身是可表达的。
+  unsupportedDateForm,
+
+  /// 时刻写法不受支持（`九点三十分`…）。同样只是写法问题。
+  unsupportedTimeForm,
+
+  /// 只有时段没有具体时刻（`明早开会`）。信息不在句子里。
+  bareTimePeriod,
+
+  /// 多个日期或时间候选，无法确定指哪一个。
+  ambiguousCandidates,
+
+  /// 整句没有任何时间表达（`买牛奶`）。
+  noTimeExpression,
+
+  /// 日期本身非法（`2月30号`）或超出可表示范围。
+  invalidDate,
+}
+
+typedef ParseOutcome = ({ParsedTaskInput? task, ParseRejection reason});
+
+/// 重复任务标记。从 [_unsupportedDatePattern] 里单独拆出来，是因为
+/// 「装不下」和「写法不认识」对调用方的意义完全不同：前者换任何解析器
+/// 或模型都无解，后者只是当前词表不够宽。
+final RegExp _recurringPattern = RegExp(
+  r'每(?:天|日|晚|早|年|个?月)|'
+  r'每(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?',
+);
+
 /// 从一句快速添加文本中抽取一个受支持的日期/时间表达式。
 ///
 /// [now] 用于相对日期和已过时间的计算；解析按设备本地时区进行。
 /// 没有唯一、完整的受支持表达式时返回 null，由调用方保留原句。
+///
+/// 需要知道**为什么**没解析出来时，用 [parseNaturalLanguageTaskDetailed]。
 ParsedTaskInput? parseNaturalLanguageTask(
+  String input, {
+  required DateTime now,
+}) => parseNaturalLanguageTaskDetailed(input, now: now).task;
+
+/// 解析并说明失败原因。见 [ParseRejection]。
+ParseOutcome parseNaturalLanguageTaskDetailed(
   String input, {
   required DateTime now,
 }) {
   if (hasUnsupportedTimeExpression(input)) {
-    return null;
+    return (
+      task: null,
+      reason: _recurringPattern.hasMatch(input)
+          ? ParseRejection.recurring
+          : ParseRejection.unsupportedDateForm,
+    );
   }
 
   final List<RegExpMatch> dateMatches = _datePattern.allMatches(input).toList();
@@ -204,14 +262,14 @@ ParsedTaskInput? parseNaturalLanguageTask(
       )
       .toList();
   if (dateMatches.length > 1 || timeMatches.length > 1) {
-    return null;
+    return (task: null, reason: ParseRejection.ambiguousCandidates);
   }
 
   final _ParsedDateToken? dateToken = dateMatches.isEmpty
       ? null
       : _parseDateToken(dateMatches.single);
   if (dateMatches.isNotEmpty && dateToken == null) {
-    return null;
+    return (task: null, reason: ParseRejection.unsupportedDateForm);
   }
 
   final ({int hour, int minute})? parsedTime = timeMatches.isEmpty
@@ -221,15 +279,15 @@ ParsedTaskInput? parseNaturalLanguageTask(
           inheritedPeriod: dateToken?.period,
         );
   if (timeMatches.isNotEmpty && parsedTime == null) {
-    return null;
+    return (task: null, reason: ParseRejection.unsupportedTimeForm);
   }
   if (bareTimePeriodMatches.isNotEmpty ||
       (dateToken?.period != null && parsedTime == null)) {
     // 裸时段没有精确小时，不猜一个默认时间。
-    return null;
+    return (task: null, reason: ParseRejection.bareTimePeriod);
   }
   if (dateToken == null && parsedTime == null) {
-    return null;
+    return (task: null, reason: ParseRejection.noTimeExpression);
   }
 
   final DateTime localNow = now.toLocal();
@@ -242,7 +300,7 @@ ParsedTaskInput? parseNaturalLanguageTask(
     effectiveTime.minute,
   );
   if (dueDate == null) {
-    return null;
+    return (task: null, reason: ParseRejection.invalidDate);
   }
 
   // 只写时间时默认取下一次到来的该时间，避免新建一个已经过期的任务。
@@ -265,7 +323,10 @@ ParsedTaskInput? parseNaturalLanguageTask(
   }
   title = title.replaceAll(RegExp(r'\s+'), ' ').trim();
 
-  return ParsedTaskInput(title: title, dueDate: dueDate);
+  return (
+    task: ParsedTaskInput(title: title, dueDate: dueDate),
+    reason: ParseRejection.none,
+  );
 }
 
 bool _matchesOverlap(RegExpMatch first, RegExpMatch second) =>

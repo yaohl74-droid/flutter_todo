@@ -758,4 +758,74 @@ void main() {
       expect(parseNaturalLanguageTask('下午3点晚上8点开会', now: now), isNull);
     });
   });
+
+  // 调用方要区分「没识别到」和「识别到了但有意拒绝」，才能决定后续动作
+  // （给用户提示、要不要换别的解析途径）。这些取值必须与主解析路径共用
+  // 同一段代码产出——在外部重新判断一遍，两边一定会随版本漂移。
+  group('拒绝原因', () {
+    final DateTime now = DateTime(2026, 7, 20, 9);
+
+    test('逐类可分辨', () {
+      final Map<String, ParseRejection> cases = <String, ParseRejection>{
+        '明天下午3点开会': ParseRejection.none,
+        '每天晚上8点吃药': ParseRejection.recurring,
+        '每周一开会': ParseRejection.recurring,
+        '每月15号交房租': ParseRejection.recurring,
+        '月底结账': ParseRejection.unsupportedDateForm,
+        '下下周一开会': ParseRejection.unsupportedDateForm,
+        '这个礼拜三开会': ParseRejection.unsupportedDateForm,
+        '今天九点三十分开会': ParseRejection.unsupportedTimeForm,
+        '明早开会': ParseRejection.bareTimePeriod,
+        '今天明天开会': ParseRejection.ambiguousCandidates,
+        '整理会议记录': ParseRejection.noTimeExpression,
+        '买牛奶': ParseRejection.noTimeExpression,
+      };
+
+      for (final MapEntry<String, ParseRejection> entry in cases.entries) {
+        expect(
+          parseNaturalLanguageTaskDetailed(entry.key, now: now).reason,
+          entry.value,
+          reason: entry.key,
+        );
+      }
+    });
+
+    // 「每」开头但不是重复语义的写法不该被误判成 recurring——
+    // 上/本/这 是方向不明，属于写法问题。
+    test('方向不明的星期词归为写法问题，不是重复任务', () {
+      for (final String input in <String>['上周一复盘', '本星期一开会', '这周三开会']) {
+        expect(
+          parseNaturalLanguageTaskDetailed(input, now: now).reason,
+          ParseRejection.unsupportedDateForm,
+          reason: input,
+        );
+      }
+    });
+
+    test('薄包装与详细版结果一致', () {
+      for (final String input in <String>[
+        '明天下午3点开会',
+        '三月一号交房租',
+        '每天晚上8点吃药',
+        '买牛奶',
+        '周三体检',
+      ]) {
+        final ParseOutcome detailed = parseNaturalLanguageTaskDetailed(
+          input,
+          now: now,
+        );
+        final ParsedTaskInput? plain = parseNaturalLanguageTask(
+          input,
+          now: now,
+        );
+        expect(plain?.title, detailed.task?.title, reason: input);
+        expect(plain?.dueDate, detailed.task?.dueDate, reason: input);
+        expect(
+          detailed.reason == ParseRejection.none,
+          plain != null,
+          reason: '$input：reason 与 task 是否为空必须一致',
+        );
+      }
+    });
+  });
 }

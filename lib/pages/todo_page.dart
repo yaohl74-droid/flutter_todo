@@ -6,17 +6,31 @@ import 'package:provider/provider.dart';
 import '../models/deleted_task.dart';
 import '../models/task.dart';
 import '../models/todo_model.dart';
+import '../services/cloud_settings.dart';
+import '../services/llm_provider.dart';
 import '../services/reminder_service.dart';
+import '../utils/cloud_task_extraction.dart';
 import '../utils/date_format.dart';
 import '../utils/natural_language_task_parser.dart';
 import '../widgets/task_input_bar.dart';
 import '../widgets/task_tile.dart';
+import 'cloud_settings_page.dart';
 import 'stats_page.dart';
+
+typedef CloudTaskResolver =
+    Future<ParsedTaskInput?> Function(
+      String input,
+      DateTime now,
+      CloudSettings settings,
+    );
 
 // 页面中的任务列表会随着用户添加任务而变化，因此要使用 StatefulWidget。
 // StatefulWidget 可以把会变化的数据保存在对应的 State 对象中。
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key});
+  const TodoPage({super.key, this.cloudSettingsStore, this.cloudTaskResolver});
+
+  final CloudSettingsStore? cloudSettingsStore;
+  final CloudTaskResolver? cloudTaskResolver;
 
   @override
   State<TodoPage> createState() => _TodoPageState();
@@ -35,9 +49,30 @@ class _TodoPageState extends State<TodoPage> {
   int _lastPersistenceFailureRevision = 0;
   bool _didInitializeReminders = false;
 
+  /// 云端兜底设置。默认关闭 —— 不主动开启就一个字节都不出设备。
+  late final CloudSettingsStore _cloudSettingsStore;
+  CloudSettings _cloudSettings = const CloudSettings();
+
+  /// 只在本次会话里提示一次"可以开启云端"，避免每输一句都催。
+  bool _didSuggestCloud = false;
+
   @override
   void initState() {
     super.initState();
+    _cloudSettingsStore =
+        widget.cloudSettingsStore ?? SecureCloudSettingsStore();
+    unawaited(_loadCloudSettings());
+  }
+
+  Future<void> _loadCloudSettings() async {
+    try {
+      final CloudSettings settings = await _cloudSettingsStore.read();
+      if (mounted) {
+        setState(() => _cloudSettings = settings);
+      }
+    } catch (_) {
+      // 读不出来就当没开启：云端是可选增强，不该影响主流程。
+    }
   }
 
   @override
@@ -131,12 +166,96 @@ class _TodoPageState extends State<TodoPage> {
     });
   }
 
+  /// 云端兜底。失败一律当作"没识别出时间"，绝不因为联网出错就丢掉任务本身。
+  Future<ParsedTaskInput?> _resolveWithCloud(String input, DateTime now) async {
+    final CloudTaskResolver? resolver = widget.cloudTaskResolver;
+    if (resolver != null) {
+      try {
+        return await resolver(input, now, _cloudSettings);
+      } catch (_) {
+        return null;
+      }
+    }
+    final OpenAiCompatibleProvider provider = OpenAiCompatibleProvider(
+      apiKey: _cloudSettings.apiKey,
+      baseUrl: _cloudSettings.baseUrl,
+      model: _cloudSettings.model,
+    );
+    try {
+      return await extractTaskCloud(
+        input,
+        now: now,
+        provider: ({required systemPrompt, required userPrompt}) async {
+          final LlmCompletion completion = await provider.completeChat(
+            systemPrompt: systemPrompt,
+            userPrompt: userPrompt,
+          );
+          return completion.text;
+        },
+      );
+    } catch (_) {
+      // 超时、限流、契约违规都走这里：任务照常添加，只是没有截止时间。
+      return null;
+    }
+  }
+
+  /// 保持原有添加提示；只有首次遇到可由云端补足的写法时增加开启引导。
+  String _addTaskMessage(
+    ParsedTaskInput? parsed,
+    ParseRejection reason,
+    bool suggestCloud,
+  ) {
+    if (parsed != null) {
+      return '已添加';
+    }
+    if (suggestCloud) {
+      return '没认出这个时间写法，已按无期限添加。开启云端识别可支持更多说法';
+    }
+    return reason == ParseRejection.noTimeExpression
+        ? '已添加'
+        : '该时间表达暂不支持，已按无期限任务添加';
+  }
+
+  Future<void> _openCloudSettings() async {
+    final CloudSettings? saved = await Navigator.of(context).push(
+      MaterialPageRoute<CloudSettings>(
+        builder: (_) => CloudSettingsPage(
+          store: _cloudSettingsStore,
+          initialSettings: _cloudSettings,
+        ),
+      ),
+    );
+    if (saved != null && mounted) {
+      setState(() => _cloudSettings = saved);
+      return;
+    }
+    await _loadCloudSettings();
+  }
+
   Future<void> _addTaskFromInput(String input) async {
     // 一次提交只读取一次当前时间，保证相对日期解析与提醒资格判断一致。
     final DateTime now = DateTime.now();
-    final ParsedTaskInput? parsed = parseNaturalLanguageTask(input, now: now);
-    final bool explicitlyUnsupported =
-        parsed == null && hasUnsupportedTimeExpression(input);
+    final ParseOutcome outcome = parseNaturalLanguageTaskDetailed(
+      input,
+      now: now,
+    );
+    ParsedTaskInput? parsed = outcome.task;
+
+    // 规则接不住时的三条去向，取决于**问了有没有可能得到不同答案**：
+    //   装不下 / 信息不在 / 答案已知 → 不问，本地弃权
+    //   只是写法不认识               → 云端有机会，开了就问
+    //   写法不认识但云端没开         → 提示一次可以开启
+    bool cloudWorthTrying = false;
+    if (parsed == null && !kLocalOnlyRejections.contains(outcome.reason)) {
+      cloudWorthTrying = true;
+      if (_cloudSettings.isConfigured) {
+        parsed = await _resolveWithCloud(input, now);
+        if (!mounted) {
+          return;
+        }
+      }
+    }
+
     final String title = parsed?.title ?? input;
     if (title.trim().isEmpty) {
       return;
@@ -179,9 +298,20 @@ class _TodoPageState extends State<TodoPage> {
       _selectedDueDate = null;
       _selectedReminderEnabled = false;
     });
+    final bool suggestCloud =
+        parsed == null &&
+        cloudWorthTrying &&
+        !_cloudSettings.isConfigured &&
+        !_didSuggestCloud;
+    if (suggestCloud) {
+      _didSuggestCloud = true;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(explicitlyUnsupported ? '该时间表达暂不支持，已按无期限任务添加' : '已添加'),
+        content: Text(_addTaskMessage(parsed, outcome.reason, suggestCloud)),
+        action: suggestCloud
+            ? SnackBarAction(label: '去开启', onPressed: _openCloudSettings)
+            : null,
       ),
     );
 
@@ -268,8 +398,7 @@ class _TodoPageState extends State<TodoPage> {
       dueDate.isAfter(DateTime.now()) &&
       _reminderService.isAvailable;
 
-  bool _isPast(DateTime? date) =>
-      date != null && !date.isAfter(DateTime.now());
+  bool _isPast(DateTime? date) => date != null && !date.isAfter(DateTime.now());
 
   Future<void> _setSelectedReminder(bool enabled) async {
     if (!enabled) {
@@ -399,10 +528,10 @@ class _TodoPageState extends State<TodoPage> {
                     subtitle: editedDueDate == null
                         ? const Text('请先设置截止时间')
                         : canEnableReminder
-                            ? const Text('到期时发送系统通知和提示音')
-                            : _isPast(editedDueDate)
-                                ? const Text('截止时间已过，无法设置提醒')
-                                : const Text('当前平台不支持到期提醒'),
+                        ? const Text('到期时发送系统通知和提示音')
+                        : _isPast(editedDueDate)
+                        ? const Text('截止时间已过，无法设置提醒')
+                        : const Text('当前平台不支持到期提醒'),
                     value: editedReminderEnabled && canEnableReminder,
                     onChanged: canEnableReminder
                         ? (enabled) async {
@@ -543,6 +672,12 @@ class _TodoPageState extends State<TodoPage> {
         ),
         centerTitle: true,
         actions: [
+          IconButton(
+            key: const ValueKey<String>('cloud-settings-button'),
+            tooltip: '云端识别设置',
+            icon: const Icon(Icons.cloud_outlined),
+            onPressed: _openCloudSettings,
+          ),
           IconButton(
             key: const ValueKey<String>('stats-button'),
             tooltip: '统计',

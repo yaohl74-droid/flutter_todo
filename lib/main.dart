@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'models/todo_model.dart';
 import 'pages/todo_page.dart';
+import 'services/cloud_settings.dart';
 import 'services/reminder_service.dart';
 import 'services/task_notification_service.dart';
 
@@ -15,10 +16,14 @@ class MyApp extends StatelessWidget {
     super.key,
     this.notificationScheduler,
     this.todoModel,
+    this.cloudSettingsStore,
+    this.cloudTaskResolver,
   });
 
   final TaskNotificationScheduler? notificationScheduler;
   final TodoModel? todoModel;
+  final CloudSettingsStore? cloudSettingsStore;
+  final CloudTaskResolver? cloudTaskResolver;
 
   @override
   Widget build(BuildContext context) {
@@ -52,7 +57,10 @@ class MyApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: const TodoPage(),
+        home: TodoPage(
+          cloudSettingsStore: cloudSettingsStore,
+          cloudTaskResolver: cloudTaskResolver,
+        ),
       ),
     );
   }

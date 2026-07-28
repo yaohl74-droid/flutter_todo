@@ -28,12 +28,16 @@ class _ParsedDateToken {
     required this.canonicalText,
     this.period,
     this.calendarDate,
+    this.dayOffset,
   });
 
   final RegExpMatch match;
   final String canonicalText;
   final _TimePeriod? period;
   final _ParsedCalendarDate? calendarDate;
+
+  /// 「N 天后」的天数偏移。相对今天计算。
+  final int? dayOffset;
 
   bool get isBareWeekday =>
       calendarDate == null && canonicalText.startsWith('周');
@@ -49,12 +53,26 @@ const String _absoluteDateTextPattern =
 const String _relativeMonthDateTextPattern =
     '(?:下(?:个)?月|这个月|本月)$_calendarNumberPattern[日号號]';
 
+/// 「N 天后」。只做天粒度:周/月粒度在口语里并不确定(「3周后」是 21 天
+/// 还是下下下周?),保守失败优于猜。
+const String _relativeDayOffsetTextPattern =
+    '(?:\\d{1,3}|[$_chineseNumberCharacters]{1,4})天(?:后|後)';
+
+final RegExp _relativeDayOffsetPattern = RegExp(
+  '^$_relativeDayOffsetTextPattern\$',
+);
+
 final RegExp _unsupportedDatePattern = RegExp(
   r'每(?:天|日|晚|早|年|个?月)|'
-  r'(?:每|本|上|这|這)(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?|'
+  // 「这/這/本周X」已改为支持(等价于裸星期词),这里只留「每」(重复)和
+  // 「上」(指向过去)。
+  r'(?:每|上)(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?|'
   r'下下(?:个|個)?(?:周|週|星期|礼拜|禮拜)(?:[一二三四五六日天])?|'
   '月初|月底|'
-  r'\d+(?:天|周|星期|礼拜|个月|月)后',
+  // 「N天后」已改为支持;周/月粒度仍不做 —— 「3周后」是 21 天还是下下下周,
+  // 口语里并不确定,保守失败优于猜。
+  r'\d+(?:周|星期|礼拜|个月|月)后|'
+  '[$_chineseNumberCharacters]+(?:周|星期|礼拜|个月|月)后',
 );
 
 final RegExp _unsupportedTimePeriodPattern = RegExp(
@@ -64,8 +82,12 @@ final RegExp _unsupportedTimePeriodPattern = RegExp(
 final RegExp _datePattern = RegExp(
   '$_relativeMonthDateTextPattern|'
   '$_absoluteDateTextPattern|'
+  // ⚠️ 顺序即优先级:带前缀的写法必须排在裸写法之前,否则只会匹配到后半段,
+  // 前缀残留在标题里、日期还错一档 —— 这一族 bug 已复发五次。
+  '$_relativeDayOffsetTextPattern|'
   r'明早|聽朝|今晚|明晚|'
   r'下(?:个|個)?(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
+  r'(?:这|這|本)(?:个|個)?(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
   r'(?:周|週|星期|礼拜|禮拜)[一二三四五六日天]|'
   r'今天|明天|明日|聽日|大后天|大後天|大後日|后天|後天|後日',
 );
@@ -347,6 +369,16 @@ bool _matchesOverlap(RegExpMatch first, RegExpMatch second) =>
 
 _ParsedDateToken? _parseDateToken(RegExpMatch match) {
   final String text = match.group(0)!;
+
+  if (_relativeDayOffsetPattern.hasMatch(text)) {
+    // 去掉尾部的「天后/天後」,只留数量部分。
+    final int? days = _parseCalendarNumber(text.substring(0, text.length - 2));
+    // 0 天后没有意义;上限防止「一百天后」这类被当成正常输入。
+    if (days == null || days < 1 || days > 999) {
+      return null;
+    }
+    return _ParsedDateToken(match: match, canonicalText: text, dayOffset: days);
+  }
   final RegExpMatch? relativeMonthMatch = _relativeMonthDatePattern.firstMatch(
     text,
   );
@@ -404,8 +436,13 @@ _ParsedDateToken? _parseDateToken(RegExpMatch match) {
       match: match,
       canonicalText: '下周${_canonicalWeekday(text)}',
     ),
+    // 「这/這/本周X」与裸星期词同义:都指本周该天,已过则顺延到下一次。
+    // 归一化成裸写法后复用同一条分支,不另开路径。
     _
-        when text.startsWith('周') ||
+        when text.startsWith('这') ||
+            text.startsWith('這') ||
+            text.startsWith('本') ||
+            text.startsWith('周') ||
             text.startsWith('週') ||
             text.startsWith('星期') ||
             text.startsWith('礼拜') ||
@@ -421,6 +458,10 @@ _ParsedDateToken? _parseDateToken(RegExpMatch match) {
 int? _parseCalendarNumber(String text) {
   if (_isArabicNumber(text)) {
     return int.parse(text);
+  }
+  // 「十」既是单字符，又是完整的十位数；必须先于单字数字分支处理。
+  if (text == '十') {
+    return 10;
   }
   if (text.length == 1) {
     return _chineseDigitValues[text];
@@ -633,8 +674,22 @@ DateTime? _resolveDate(
     return _resolveCalendarDate(calendarDate, now, hour, minute);
   }
 
-  final String? dateText = dateToken?.canonicalText;
   final DateTime today = DateTime(now.year, now.month, now.day);
+
+  // 命名避开下方裸星期词分支里的同名局部变量。
+  final int? relativeDays = dateToken?.dayOffset;
+  if (relativeDays != null) {
+    // 用日历字段构造,靠溢出归一化处理跨月/跨年/闰年。
+    return DateTime(
+      today.year,
+      today.month,
+      today.day + relativeDays,
+      hour,
+      minute,
+    );
+  }
+
+  final String? dateText = dateToken?.canonicalText;
   if (dateText == null || dateText == '今天') {
     return DateTime(today.year, today.month, today.day, hour, minute);
   }

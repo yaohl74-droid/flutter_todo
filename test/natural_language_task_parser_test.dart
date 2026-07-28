@@ -7,10 +7,10 @@ void main() {
       for (final String input in <String>[
         '每天晚上8点吃药',
         '每周一开会',
-        '这个礼拜三开会',
+        '上个礼拜三复盘',
         '下下周一开会',
         '月底结账',
-        '3天后开会',
+        '3周后开会',
         '明早开会',
         '聽朝开会',
       ]) {
@@ -102,6 +102,17 @@ void main() {
         '禮拜五',
         '下週三',
         '下個禮拜三',
+        // 每加一个新写法都要进这份清单——这一族 bug 复发五次，
+        // 每次都是因为没有清单强制检查前缀残留。
+        '这周三',
+        '這週三',
+        '本礼拜五',
+        '这个星期三',
+        '三天后',
+        '3天后',
+        '三天後',
+        '十天后',
+        '两天后',
       ];
       for (final String word in words) {
         final ParsedTaskInput? result = parseNaturalLanguageTask(
@@ -232,7 +243,6 @@ void main() {
         '上个周三复盘',
         '上个星期三复盘',
         '上个礼拜三复盘',
-        '这个礼拜三开会',
         '每个星期三开会',
       ];
 
@@ -282,6 +292,8 @@ void main() {
             '禮拜五交周报': (title: '交周报', dueDate: DateTime(2026, 7, 24, 23, 59)),
             '下週三评审': (title: '评审', dueDate: DateTime(2026, 7, 29, 23, 59)),
             '下個禮拜三开会': (title: '开会', dueDate: DateTime(2026, 7, 29, 23, 59)),
+            '这週三开会': (title: '开会', dueDate: DateTime(2026, 7, 22, 23, 59)),
+            '這個禮拜三开会': (title: '开会', dueDate: DateTime(2026, 7, 22, 23, 59)),
           };
 
       for (final MapEntry<String, ({String title, DateTime dueDate})> entry
@@ -302,8 +314,6 @@ void main() {
         '每禮拜一开会',
         '上週三复盘',
         '上個禮拜三复盘',
-        '这週三开会',
-        '這個禮拜三开会',
         '下下週一开会',
         '每個禮拜三开会',
       ];
@@ -697,15 +707,13 @@ void main() {
         '每周一开会',
         '月底结账',
         '月初复盘',
-        '3天后开会',
-        '本周一开会',
+        '3周后开会',
         '上周一复盘',
         '下下周一开会',
         '每星期一开会',
         '每礼拜一开会',
         '每周下午3点开会',
         '每星期下午3点开会',
-        '本星期一开会',
         '下下礼拜一开会',
       ];
 
@@ -759,6 +767,90 @@ void main() {
     });
   });
 
+  group('N 天后与本周星期词', () {
+    final DateTime tuesday = DateTime(2026, 7, 21, 9); // 周二
+
+    test('N 天后按天数偏移，中文数字与阿拉伯数字等价', () {
+      final Map<String, DateTime> cases = <String, DateTime>{
+        '一天后交周报': DateTime(2026, 7, 22, 23, 59),
+        '两天后交周报': DateTime(2026, 7, 23, 23, 59),
+        '三天后交周报': DateTime(2026, 7, 24, 23, 59),
+        '3天后交周报': DateTime(2026, 7, 24, 23, 59),
+        '三天後交周报': DateTime(2026, 7, 24, 23, 59),
+        '十天后交周报': DateTime(2026, 7, 31, 23, 59),
+      };
+
+      for (final MapEntry<String, DateTime> entry in cases.entries) {
+        final ParsedTaskInput? result = parseNaturalLanguageTask(
+          entry.key,
+          now: tuesday,
+        );
+        expect(result?.dueDate, entry.value, reason: entry.key);
+        expect(result?.title, '交周报', reason: entry.key);
+      }
+    });
+
+    test('N 天后跨月跨年由日历构造归一化', () {
+      expect(
+        parseNaturalLanguageTask(
+          '五天后交周报',
+          now: DateTime(2026, 12, 30, 9),
+        )?.dueDate,
+        DateTime(2027, 1, 4, 23, 59),
+      );
+    });
+
+    test('N 天后与时刻组合', () {
+      expect(
+        parseNaturalLanguageTask('三天后下午3点开会', now: tuesday)?.dueDate,
+        DateTime(2026, 7, 24, 15),
+      );
+    });
+
+    // 「这周X」与裸星期词同义：都指本周该天，已过则顺延到下一次。
+    test('这周X 与裸星期词等价', () {
+      for (final String prefix in <String>['这', '這', '本']) {
+        expect(
+          parseNaturalLanguageTask('$prefix周三体检', now: tuesday)?.dueDate,
+          parseNaturalLanguageTask('周三体检', now: tuesday)?.dueDate,
+          reason: prefix,
+        );
+      }
+      expect(
+        parseNaturalLanguageTask('这周三体检', now: tuesday)?.dueDate,
+        DateTime(2026, 7, 22, 23, 59),
+      );
+      expect(parseNaturalLanguageTask('这个星期五交周报', now: tuesday)?.title, '交周报');
+    });
+
+    test('周/月粒度的 N 后仍不支持，上周与每周不受影响', () {
+      for (final String input in <String>[
+        '三周后开会',
+        '3个月后开会',
+        '两个月后复盘',
+        '上周三复盘',
+        '每周一开会',
+        '下下周一开会',
+      ]) {
+        expect(
+          parseNaturalLanguageTask(input, now: tuesday),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+
+    test('零天后与超范围天数不解析', () {
+      for (final String input in <String>['0天后开会', '1000天后开会']) {
+        expect(
+          parseNaturalLanguageTask(input, now: tuesday),
+          isNull,
+          reason: input,
+        );
+      }
+    });
+  });
+
   // 调用方要区分「没识别到」和「识别到了但有意拒绝」，才能决定后续动作
   // （给用户提示、要不要换别的解析途径）。这些取值必须与主解析路径共用
   // 同一段代码产出——在外部重新判断一遍，两边一定会随版本漂移。
@@ -773,7 +865,10 @@ void main() {
         '每月15号交房租': ParseRejection.recurring,
         '月底结账': ParseRejection.unsupportedDateForm,
         '下下周一开会': ParseRejection.unsupportedDateForm,
-        '这个礼拜三开会': ParseRejection.unsupportedDateForm,
+        '上个礼拜三复盘': ParseRejection.unsupportedDateForm,
+        '三周后开会': ParseRejection.unsupportedDateForm,
+        '这周三体检': ParseRejection.none, // 已改为支持
+        '三天后交周报': ParseRejection.none, // 已改为支持
         '今天九点三十分开会': ParseRejection.unsupportedTimeForm,
         '明早开会': ParseRejection.bareTimePeriod,
         '今天明天开会': ParseRejection.ambiguousCandidates,
@@ -790,10 +885,10 @@ void main() {
       }
     });
 
-    // 「每」开头但不是重复语义的写法不该被误判成 recurring——
-    // 上/本/这 是方向不明，属于写法问题。
-    test('方向不明的星期词归为写法问题，不是重复任务', () {
-      for (final String input in <String>['上周一复盘', '本星期一开会', '这周三开会']) {
+    // 「上」指向过去，属于写法不支持而非重复语义——两者对调用方的意义不同：
+    // 重复是数据模型装不下，写法问题只是词表不够宽。
+    test('指向过去的星期词归为写法问题，不是重复任务', () {
+      for (final String input in <String>['上周一复盘', '上个星期一开会', '上礼拜三复盘']) {
         expect(
           parseNaturalLanguageTaskDetailed(input, now: now).reason,
           ParseRejection.unsupportedDateForm,

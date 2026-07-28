@@ -7,8 +7,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_todo/main.dart';
 import 'package:my_todo/models/task.dart';
 import 'package:my_todo/models/todo_model.dart';
+import 'package:my_todo/pages/todo_page.dart';
+import 'package:my_todo/services/cloud_settings.dart';
 import 'package:my_todo/pages/stats_page.dart';
 import 'package:my_todo/services/task_notification_service.dart';
+import 'package:my_todo/utils/natural_language_task_parser.dart';
+
+class _MemoryCloudSettingsStore implements CloudSettingsStore {
+  _MemoryCloudSettingsStore([this.settings = const CloudSettings()]);
+
+  CloudSettings settings;
+
+  @override
+  Future<CloudSettings> read() async => settings;
+
+  @override
+  Future<void> write(CloudSettings settings) async {
+    this.settings = settings;
+  }
+}
 
 class _FakeNotificationScheduler implements TaskNotificationScheduler {
   _FakeNotificationScheduler({
@@ -52,10 +69,14 @@ class _FakeNotificationScheduler implements TaskNotificationScheduler {
 
 Widget _buildTestApp({
   _FakeNotificationScheduler? notificationScheduler,
+  CloudSettingsStore? cloudSettingsStore,
+  CloudTaskResolver? cloudTaskResolver,
 }) {
   return MyApp(
     notificationScheduler:
         notificationScheduler ?? _FakeNotificationScheduler(),
+    cloudSettingsStore: cloudSettingsStore ?? _MemoryCloudSettingsStore(),
+    cloudTaskResolver: cloudTaskResolver,
   );
 }
 
@@ -184,6 +205,121 @@ void main() {
     final List<dynamic> savedTasks =
         jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
     expect(savedTasks.last['dueDateUtc'], isNull);
+  });
+
+  testWidgets('本地能定论的拒绝原因绝不调用云端', (WidgetTester tester) async {
+    var cloudCalls = 0;
+    await tester.pumpWidget(
+      _buildTestApp(
+        cloudSettingsStore: _MemoryCloudSettingsStore(
+          const CloudSettings(enabled: true, apiKey: 'sk-test'),
+        ),
+        cloudTaskResolver: (input, now, settings) async {
+          cloudCalls++;
+          return null;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final input in <String>['每天晚上8点吃药', '买牛奶', '明早开会']) {
+      await tester.enterText(find.byType(TextField).first, input);
+      await tester.tap(find.text('添加'));
+      await tester.pump();
+    }
+
+    expect(cloudCalls, 0);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(
+      savedTasks.skip(savedTasks.length - 3).map((task) => task['title']),
+      <String>['每天晚上8点吃药', '买牛奶', '明早开会'],
+    );
+  });
+
+  testWidgets('规则不认识时调用已配置的云端', (WidgetTester tester) async {
+    var cloudCalls = 0;
+    await tester.pumpWidget(
+      _buildTestApp(
+        cloudSettingsStore: _MemoryCloudSettingsStore(
+          const CloudSettings(enabled: true, apiKey: 'sk-test'),
+        ),
+        cloudTaskResolver: (input, now, settings) async {
+          cloudCalls++;
+          expect(input, '下午三点十五分开会');
+          expect(settings.isConfigured, isTrue);
+          return ParsedTaskInput(
+            title: '开会',
+            dueDate: DateTime(now.year, now.month, now.day, 15, 15),
+          );
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '下午三点十五分开会');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    expect(cloudCalls, 1);
+    expect(find.text('开会'), findsOneWidget);
+    expect(find.text('下午三点十五分开会'), findsNothing);
+  });
+
+  testWidgets('云端异常时仍按无期限任务保存原句', (WidgetTester tester) async {
+    var cloudCalls = 0;
+    await tester.pumpWidget(
+      _buildTestApp(
+        cloudSettingsStore: _MemoryCloudSettingsStore(
+          const CloudSettings(enabled: true, apiKey: 'sk-test'),
+        ),
+        cloudTaskResolver: (input, now, settings) async {
+          cloudCalls++;
+          throw StateError('offline');
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '下午三点十五分开会');
+    await tester.tap(find.text('添加'));
+    await tester.pumpAndSettle();
+
+    expect(cloudCalls, 1);
+    expect(find.text('下午三点十五分开会'), findsOneWidget);
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
+    final List<dynamic> savedTasks =
+        jsonDecode(preferences.getString('tasks')!) as List<dynamic>;
+    expect(savedTasks.last['title'], '下午三点十五分开会');
+    expect(savedTasks.last['dueDateUtc'], isNull);
+  });
+
+  testWidgets('云端未开启时只提示一次且主界面保留设置入口', (WidgetTester tester) async {
+    final store = _MemoryCloudSettingsStore();
+    await tester.pumpWidget(_buildTestApp(cloudSettingsStore: store));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, '下午三点十五分开会');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+    expect(find.text('去开启'), findsOneWidget);
+    tester
+        .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+        .removeCurrentSnackBar();
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).first, '下午三点十五分复盘');
+    await tester.tap(find.text('添加'));
+    await tester.pump();
+    expect(find.text('去开启'), findsNothing);
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('cloud-settings-button')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('模型与云端设置'), findsOneWidget);
+    expect(find.textContaining('任务文本会发送到第三方服务器'), findsOneWidget);
   });
 
   testWidgets('解析出的未来时间自动申请权限并开启提醒', (WidgetTester tester) async {
@@ -499,9 +635,7 @@ void main() {
     expect(savedTasks.single['reminderEnabled'], isTrue);
   });
 
-  testWidgets('不支持提醒的平台编辑未来任务显示平台提示而非过期', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('不支持提醒的平台编辑未来任务显示平台提示而非过期', (WidgetTester tester) async {
     // 默认 fake scheduler 的 isAvailable 为 false，模拟 Web/Windows/Linux。
     final DateTime futureDue = DateTime.now()
         .add(const Duration(days: 1))
@@ -552,9 +686,7 @@ void main() {
     expect(find.text('当前平台不支持到期提醒'), findsNothing);
   });
 
-  testWidgets('不支持提醒的平台选未来日期在录入区显示平台提示', (
-    WidgetTester tester,
-  ) async {
+  testWidgets('不支持提醒的平台选未来日期在录入区显示平台提示', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
     await tester.pumpAndSettle();
 
@@ -999,7 +1131,10 @@ void main() {
     // 今天的柱子计数为 1，其余 6 天为 0；限定在统计页内查找，
     // 避免匹配到仍挂在路由栈里的上一页文本。
     final Finder statsPage = find.byType(StatsPage);
-    expect(find.descendant(of: statsPage, matching: find.text('1')), findsOneWidget);
+    expect(
+      find.descendant(of: statsPage, matching: find.text('1')),
+      findsOneWidget,
+    );
     expect(
       find.descendant(of: statsPage, matching: find.text('0')),
       findsNWidgets(6),

@@ -71,3 +71,15 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// Flutter 固定生成 app-release.apk；额外复制一份使用产品名的发布包，
+// 既保留 flutter run/build 对默认文件名的识别，也提供可直接分发的稳定名称。
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    doLast {
+        project.copy {
+            from(layout.buildDirectory.file("outputs/apk/release/app-release.apk"))
+            into(layout.buildDirectory.dir("outputs/flutter-apk"))
+            rename { "AI_Todo.apk" }
+        }
+    }
+}

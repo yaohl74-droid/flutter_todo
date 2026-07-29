@@ -48,6 +48,12 @@ flutter build macos --debug
 flutter build apk --release
 ```
 
+Android Release 构建完成后，可分发产物位于：
+
+```text
+build/app/outputs/flutter-apk/AI_Todo.apk
+```
+
 ## 中文时间解析
 
 提交任务时，解析器会移除识别出的时间词，只把正文保留为标题。
@@ -81,11 +87,25 @@ flutter build apk --release
 
 ## 可选云端识别
 
-点击主界面右上角的云朵进入设置。云端能力默认关闭，需要用户主动配置：
+点击主界面右上角的云朵进入设置。统计入口独立位于左上角，不再和云端设置混在
+一起。云端能力默认关闭，需要用户主动配置：
 
 - API Key
 - Base URL
 - Model
+
+设置页提供以下预设，选择后会自动填入 Base URL 与默认模型；模型 ID 仍可按各家
+控制台实际开通情况修改：
+
+| 服务商 | 默认模型 |
+|---|---|
+| DeepSeek | `deepseek-v4-pro` |
+| 通义千问（阿里云百炼） | `qwen-plus` |
+| 火山方舟（豆包） | `doubao-seed-1-6-251015` |
+| 腾讯混元 TokenHub | `hy3-preview` |
+| Kimi | `kimi-k2.6` |
+| 智谱 GLM | `glm-4.7` |
+| 自定义 OpenAI 兼容服务 | 用户填写 |
 
 默认 Base URL 为 `https://api.deepseek.com`。请求使用
 `{Base URL}/chat/completions`，因此也可连接其他兼容 OpenAI Chat Completions

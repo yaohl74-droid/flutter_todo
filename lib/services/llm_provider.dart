@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'cloud_settings.dart';
+
 abstract class LlmProvider {
   /// 返回模型原始文本输出。
   Future<String> complete(String prompt);
@@ -61,6 +63,7 @@ class OpenAiCompatibleProvider implements LlmProvider {
     required String baseUrl,
     required String model,
     http.Client? client,
+    this.provider = CloudProvider.deepSeek,
     this.timeout = const Duration(seconds: 30),
     this.maxTokens = 512,
     this.disableThinking = true,
@@ -73,6 +76,7 @@ class OpenAiCompatibleProvider implements LlmProvider {
   final String _model;
   final Uri _endpoint;
   final http.Client _client;
+  final CloudProvider provider;
   final Duration timeout;
 
   /// 首轮实测教训:`max_tokens: 200` 太小,31 条里 7 条拿不到 `content`
@@ -85,7 +89,8 @@ class OpenAiCompatibleProvider implements LlmProvider {
   ///
   /// **这个任务(从一句话里抽日期)不需要推理**,关掉更快更便宜,
   /// 也让它与本地模型(无 thinking)的对比更公平。
-  /// 对不支持该字段的供应商,多传一个未知字段通常被忽略;若报错则设为 false。
+  /// 各供应商的关闭参数并不统一，由 provider 生成对应请求字段；未知的兼容
+  /// 服务不附加任何私有字段，避免被严格接口拒绝。
   final bool disableThinking;
 
   @override
@@ -129,8 +134,7 @@ class OpenAiCompatibleProvider implements LlmProvider {
               'temperature': 0,
               'max_tokens': maxTokens,
               'stream': false,
-              if (disableThinking)
-                'thinking': <String, String>{'type': 'disabled'},
+              ..._thinkingParameters(),
             }),
           )
           .timeout(timeout);
@@ -180,6 +184,20 @@ class OpenAiCompatibleProvider implements LlmProvider {
         '云端响应缺少有效的 choices.message.content',
       );
     }
+  }
+
+  Map<String, Object> _thinkingParameters() {
+    if (!disableThinking) return const <String, Object>{};
+    return switch (provider) {
+      CloudProvider.deepSeek ||
+      CloudProvider.volcengine ||
+      CloudProvider.kimi ||
+      CloudProvider.glm => <String, Object>{
+        'thinking': <String, String>{'type': 'disabled'},
+      },
+      CloudProvider.qwen => <String, Object>{'enable_thinking': false},
+      CloudProvider.hunyuan || CloudProvider.custom => const <String, Object>{},
+    };
   }
 
   static LlmUsage? _parseUsage(Object? rawUsage) {

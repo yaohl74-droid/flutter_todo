@@ -180,6 +180,7 @@ class _TodoPageState extends State<TodoPage> {
       apiKey: _cloudSettings.apiKey,
       baseUrl: _cloudSettings.baseUrl,
       model: _cloudSettings.model,
+      provider: _cloudSettings.provider,
     );
     try {
       return await extractTaskCloud(
@@ -667,6 +668,19 @@ class _TodoPageState extends State<TodoPage> {
     // Scaffold 是 Material Design 页面结构，提供 AppBar、主体等常用区域。
     return Scaffold(
       appBar: AppBar(
+        leading: IconButton(
+          key: const ValueKey<String>('stats-button'),
+          tooltip: '统计',
+          icon: const Icon(Icons.bar_chart),
+          onPressed: () {
+            // 路由仍在 MultiProvider 子树内，StatsPage 可正常 watch TodoModel。
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (routeContext) => const StatsPage(),
+              ),
+            );
+          },
+        ),
         title: Text(
           '我的待办 (${todoModel.completedCount}/${todoModel.tasks.length})',
         ),
@@ -677,19 +691,6 @@ class _TodoPageState extends State<TodoPage> {
             tooltip: '云端识别设置',
             icon: const Icon(Icons.cloud_outlined),
             onPressed: _openCloudSettings,
-          ),
-          IconButton(
-            key: const ValueKey<String>('stats-button'),
-            tooltip: '统计',
-            icon: const Icon(Icons.bar_chart),
-            onPressed: () {
-              // 路由仍在 MultiProvider 子树内，StatsPage 可正常 watch TodoModel。
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (routeContext) => const StatsPage(),
-                ),
-              );
-            },
           ),
         ],
       ),

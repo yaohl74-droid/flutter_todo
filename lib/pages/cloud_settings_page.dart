@@ -20,6 +20,7 @@ class _CloudSettingsPageState extends State<CloudSettingsPage> {
   late final TextEditingController _apiKeyController;
   late final TextEditingController _baseUrlController;
   late final TextEditingController _modelController;
+  late CloudProvider _provider;
   late bool _enabled;
   bool _obscureApiKey = true;
   bool _saving = false;
@@ -29,6 +30,7 @@ class _CloudSettingsPageState extends State<CloudSettingsPage> {
     super.initState();
     final initial = widget.initialSettings;
     _enabled = initial.enabled;
+    _provider = initial.provider;
     _apiKeyController = TextEditingController(text: initial.apiKey);
     _baseUrlController = TextEditingController(text: initial.baseUrl);
     _modelController = TextEditingController(text: initial.model);
@@ -58,6 +60,7 @@ class _CloudSettingsPageState extends State<CloudSettingsPage> {
       apiKey: _apiKeyController.text.trim(),
       baseUrl: baseUrl,
       model: model,
+      provider: _provider,
     );
     try {
       await widget.store.write(settings);
@@ -101,6 +104,44 @@ class _CloudSettingsPageState extends State<CloudSettingsPage> {
               onChanged: (value) => setState(() => _enabled = value),
             ),
             const SizedBox(height: 12),
+            DropdownButtonFormField<CloudProvider>(
+              key: const Key('cloudProvider'),
+              initialValue: _provider,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: '服务商',
+                border: OutlineInputBorder(),
+              ),
+              items: CloudProvider.values
+                  .map(
+                    (provider) => DropdownMenuItem<CloudProvider>(
+                      value: provider,
+                      child: Text(provider.label),
+                    ),
+                  )
+                  .toList(),
+              onChanged: _saving
+                  ? null
+                  : (provider) {
+                      if (provider == null) return;
+                      setState(() {
+                        _provider = provider;
+                        if (provider != CloudProvider.custom) {
+                          _baseUrlController.text = provider.baseUrl;
+                          _modelController.text = provider.defaultModel;
+                        }
+                      });
+                    },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _provider.description,
+              key: const Key('cloudProviderDescription'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF66806C)),
+            ),
+            const SizedBox(height: 16),
             TextField(
               key: const Key('cloudApiKey'),
               controller: _apiKeyController,

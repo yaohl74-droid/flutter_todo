@@ -120,6 +120,22 @@ void main() {
     expect(savedTasks.map((task) => task['title']), ['买菜', '写代码', '跑步']);
   });
 
+  testWidgets('统计入口在左上方且与右侧云端入口分离', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestApp());
+    await tester.pumpAndSettle();
+
+    final double statsX = tester
+        .getCenter(find.byKey(const ValueKey<String>('stats-button')))
+        .dx;
+    final double titleX = tester.getCenter(find.text('我的待办 (0/3)')).dx;
+    final double cloudX = tester
+        .getCenter(find.byKey(const ValueKey<String>('cloud-settings-button')))
+        .dx;
+
+    expect(statsX, lessThan(titleX));
+    expect(cloudX, greaterThan(titleX));
+  });
+
   testWidgets('添加非空任务并清空输入框', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestApp());
 
@@ -320,6 +336,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('模型与云端设置'), findsOneWidget);
     expect(find.textContaining('任务文本会发送到第三方服务器'), findsOneWidget);
+  });
+
+  testWidgets('选择云端服务商会填入对应地址和模型并保存', (WidgetTester tester) async {
+    final store = _MemoryCloudSettingsStore();
+    await tester.pumpWidget(_buildTestApp(cloudSettingsStore: store));
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(const ValueKey<String>('cloud-settings-button')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('cloudProvider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('通义千问（Qwen）').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('cloudBaseUrl')))
+          .controller!
+          .text,
+      CloudProvider.qwen.baseUrl,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('cloudModel')))
+          .controller!
+          .text,
+      CloudProvider.qwen.defaultModel,
+    );
+
+    await tester.tap(find.byKey(const Key('saveCloudSettings')));
+    await tester.pumpAndSettle();
+
+    expect(store.settings.provider, CloudProvider.qwen);
+    expect(store.settings.baseUrl, CloudProvider.qwen.baseUrl);
+    expect(store.settings.model, CloudProvider.qwen.defaultModel);
   });
 
   testWidgets('解析出的未来时间自动申请权限并开启提醒', (WidgetTester tester) async {
@@ -1085,7 +1138,30 @@ void main() {
         reason: '桌面窗口高度 $height 不应触发 RenderFlex 溢出',
       );
       expect(find.byKey(const ValueKey<String>('trend-bar-6')), findsOneWidget);
+      final Rect rateCard = tester.getRect(
+        find.byKey(const ValueKey<String>('stats-rate-card')),
+      );
+      final Rect trendCard = tester.getRect(
+        find.byKey(const ValueKey<String>('stats-trend-card')),
+      );
+      expect(rateCard.top, closeTo(trendCard.top, 0.1));
+      expect(rateCard.bottom, closeTo(trendCard.bottom, 0.1));
+      expect(rateCard.left, lessThanOrEqualTo(25));
+      expect(trendCard.right, greaterThanOrEqualTo(1255));
     }
+
+    await tester.binding.setSurfaceSize(const Size(700, 900));
+    await tester.pumpAndSettle();
+    final Rect narrowRateCard = tester.getRect(
+      find.byKey(const ValueKey<String>('stats-rate-card')),
+    );
+    final Rect narrowTrendCard = tester.getRect(
+      find.byKey(const ValueKey<String>('stats-trend-card')),
+    );
+    expect(narrowRateCard.left, closeTo(narrowTrendCard.left, 0.1));
+    expect(narrowRateCard.right, closeTo(narrowTrendCard.right, 0.1));
+    expect(narrowRateCard.top, lessThan(narrowTrendCard.top));
+    expect(narrowTrendCard.bottom, greaterThanOrEqualTo(883));
   });
 
   testWidgets('没有任务时统计页显示空态', (WidgetTester tester) async {

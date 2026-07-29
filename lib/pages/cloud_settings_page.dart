@@ -63,6 +63,10 @@ class _CloudSettingsPageState extends State<CloudSettingsPage> {
       await widget.store.write(settings);
       if (mounted) Navigator.of(context).pop(settings);
     } catch (error) {
+      // 把底层原因打出来。只显示「保存失败」等于把 Keychain 的真实报错吞掉，
+      // 排查时只能靠猜 —— 本项目已因此绕过弯路。
+      // 注意只打异常本身，settings 里有 API Key，绝不能进日志。
+      debugPrint('CLOUD_SETTINGS|write_failed|${error.runtimeType}|$error');
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(

@@ -158,7 +158,67 @@ class Task {
 flutter pub get
 flutter run                 # 连接设备/模拟器
 flutter run -d chrome       # Web
+flutter run -d macos        # macOS 本机 Debug
+flutter build macos --debug # macOS Debug 应用
 flutter build apk --release # Android 发布包
+```
+
+### macOS 构建与 Keychain
+
+macOS 版使用 `flutter_secure_storage` 把 API Key 写入系统 Keychain。当前依赖的
+`flutter_secure_storage_macos` 尚不支持 Swift Package Manager，因此即使 Flutter
+工程启用了 SPM，macOS 构建仍必须安装 CocoaPods：
+
+```bash
+brew install cocoapods
+pod --version
+flutter pub get
+flutter build macos --debug
+open build/macos/Build/Products/Debug/my_todo.app
+```
+
+首次执行时 Flutter 会自动运行 `pod install`。如果看到
+`flutter_secure_storage_macos does not support Swift Package Manager`，它是说明
+为什么需要 CocoaPods 的提示；缺少 `pod` 才会令构建终止。`pod install` 还可能改动
+Xcode project、workspace 或生成 `Podfile.lock`，提交前应检查 `git diff`，避免把纯
+本机构建产物混进功能提交。
+
+Keychain 与代码签名有一组容易混淆的限制。macOS 上
+`flutter_secure_storage` 即使运行在非沙盒应用中，也必须声明有效的
+`keychain-access-groups`；漏掉时写入会报
+`-34018 errSecMissingEntitlement`，设置页表现为“保存失败，请重试”。
+
+本仓库的 Debug 和 Release entitlement 都保留 App Sandbox，并声明：
+
+- `keychain-access-groups`：
+  `$(AppIdentifierPrefix)$(CFBundleIdentifier)`，用于 Keychain 写入；
+- `com.apple.security.network.client`：用于调用云端 API。
+
+`$(AppIdentifierPrefix)` 必须由真实开发者团队解析，因此 macOS 构建前需要在
+Xcode 中配置签名：
+
+1. 打开 `macos/Runner.xcworkspace`；
+2. 选择 **Runner → TARGETS/Runner → Signing & Capabilities**；
+3. 勾选 **Automatically manage signing**；
+4. 在 **Team** 中选择自己的 Apple ID；免费账号的 Personal Team 足够本地开发。
+
+没有 Team 时会两头受阻：
+
+- 保留 Keychain entitlement：构建报
+  `"Runner" has entitlements that require signing with a development certificate"`；
+- 删除 entitlement：应用可以启动，但保存 SK 时会报 `-34018`。
+
+不要为绕过签名把 API Key 降级存入 `SharedPreferences`。Xcode 可能把个人
+`DEVELOPMENT_TEAM` 写进 `project.pbxproj`；公开仓库或多人协作时，应在提交前确认
+是否改用本地配置，避免把个人 Team ID 硬编码进版本库。
+
+修改 macOS entitlement 后至少运行：
+
+```bash
+plutil -lint macos/Runner/DebugProfile.entitlements \
+  macos/Runner/Release.entitlements
+flutter test test/macos_entitlements_test.dart
+flutter build macos --debug
 ```
 
 ## 📄 许可

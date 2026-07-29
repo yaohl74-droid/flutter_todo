@@ -8,5 +8,19 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
+	<!-- 云端识别的出站请求。缺了会在保存成功后、调用 API 时失败。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- flutter_secure_storage 在 macOS 上必须要这条，否则写入报
+	     -34018 errSecMissingEntitlement（非沙盒也一样，实测过）。
+	     ⚠️ 它要求 Xcode 里配置了 DEVELOPMENT_TEAM：$(AppIdentifierPrefix)
+	     需要真实团队前缀才能解析。ad-hoc 签名下构建会直接失败：
+	     "has entitlements that require signing with a development certificate"。
+	     免费 Apple ID 的 Personal Team 即可，见 README
+	     「macOS 构建与 Keychain」一节。 -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(CFBundleIdentifier)</string>
+	</array>
 </dict>
 </plist>

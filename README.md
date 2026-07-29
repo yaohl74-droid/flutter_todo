@@ -1,173 +1,110 @@
 # 我的待办 · my_todo
 
-> 极简、本地优先的跨平台待办清单 — 支持中文自然语言快速添加、到期提醒与完成统计。
-> A minimalist, local-first cross-platform to-do app built with Flutter.
+一个本地优先的 Flutter 待办应用。支持中文自然语言录入、到期提醒、回收站、
+灵活排序与完成统计；本地规则无法识别的时间写法，可以选择交给兼容
+OpenAI Chat Completions 的云端服务兜底。
+
+> 任务数据始终保存在当前设备。云端识别默认关闭，也不提供任务同步。
 
 <p align="center">
-  <img src="screenshots/home.png" width="45%" alt="主界面" />
+  <img src="screenshots/home.png" width="45%" alt="待办主界面" />
   &nbsp;&nbsp;
-  <img src="screenshots/stats.png" width="45%" alt="统计页" />
+  <img src="screenshots/stats.png" width="45%" alt="完成统计页" />
 </p>
 
-## ✨ 特性
+## 功能
 
-- 🗣️ **自然语言快速添加** — 输入「大后天下午2点 面试产品经理」，自动拆出任务标题和截止时间
-- ☁️ **可选云端兜底** — 本地规则不认识的时间写法可交给云端识别，默认关闭
-- ⏰ **到期提醒** — 本地系统通知，到点提醒；权限被拒也不丢任务，仅关闭提醒
-- 📊 **完成统计** — 任务完成率 + 最近 7 天完成趋势
-- 🗑️ **回收站** — 删除后 7 天内可恢复到原位置，超期自动清理
-- 🔀 **灵活排序** — 按添加顺序 / 截止日期 / 完成状态，支持升降序，偏好本地保存
-- 💾 **本地优先** — 任务数据只存本地；不开启云端识别时，解析也完全留在设备上
-- 🎯 **一套代码跨平台** — Android / macOS / Web / Linux / Windows
+- **自然语言快速添加**：从一句中文里提取任务标题与截止时间
+- **本地优先解析**：常见日期和时间完全在设备上处理
+- **可选云端兜底**：仅在本地规则无法判断写法时请求用户配置的服务
+- **到期提醒**：Android、iOS 和 macOS 使用系统通知
+- **本地持久化**：任务、回收站和排序偏好保存在当前设备
+- **安全存储密钥**：API Key 写入 Keystore/Keychain，不进入明文偏好设置
+- **回收站**：删除后 7 天内可恢复，超期自动清理
+- **排序与统计**：支持添加顺序、截止日期、完成状态和最近 7 天趋势
+- **旧数据迁移**：兼容早期任务结构、旧时间格式和缺失字段
 
-## 🛠️ 技术栈
+## 快速开始
 
-`Flutter` · `Dart` · `Provider`（状态管理）· `shared_preferences`（本地持久化）· `flutter_secure_storage`（密钥安全存储）· `http`（可选云端识别）· `flutter_local_notifications`（到期提醒）· 手写规则解析器（中文自然语言日期）
+### 环境
 
-## 🗣️ 自然语言快速添加
-
-在输入框里直接写一句话，点「添加」或按回车时解析一次，自动把时间词抽走、只留任务正文，并填入截止时间。
-
-支持的表达（第一版，其余整句作为普通标题，不猜测）：
-
-| 类别 | 示例 |
-|---|---|
-| 相对日 | 今天、明天、后天、大后天 |
-| 星期 | 周一~周日、下周三、下个礼拜三、礼拜五、下星期二 |
-| 时间点 | 上午9点、下午3点、晚上8点、15:00、15点30 |
-| 中文数字 | 三点、两点、十一点 |
-| 口语分钟 | 点半、点一刻、点三刻、9点30分 |
-| 中午 | 中午、中午12点（消解正午/午夜歧义） |
-| 日期 + 时段 | 明早九点、明天早上九点、今晚8点、明晚八点一刻 |
-| 组合 | 大后天下午3点、下周一上午9点30分 |
-
-设计要点：
-
-- **只指定日期**默认当天 `23:59`（「当天截止」语义，避免刚建就过期）。
-- **只指定时间且今天已过** → 顺延到明天同一时间；明确写「今天」则尊重、允许过期。
-- **星期方向必须明确受支持**：「下个周三」「下个星期三」「下个礼拜三」按下一个自然周解析；「上个」「这个」「每个」开头的星期表达式不解析，不会从内部降级成未来的裸星期。
-- **裸时段不猜时间**：「明早开会」「明天早上开会」「下午开会」不解析；写成「明早九点」或「明天早上九点」即可。`中午`是明确支持的例外，按 `12:00` 处理。
-- **手动用日历选过时间** → 手动优先，但识别出的时间词仍从标题中抽走。
-- 解析器是**纯函数**，注入「当前时间」，不读系统时钟，可大量单测。
-
-不解析的表达（故意保守，宁可不猜）：
-
-- **重复任务**：每天 / 每晚 / 每月 / 每周一 —— 数据模型只有单个截止时间。
-- **绝对日期**：3月5号 / 三月一号 / 2015年3月3号。
-- **模糊相对日期**：月初 / 月底 / 3天后。
-- **星期方向不明**：以「上个」「这个」「下下」开头的星期表达。
-- **裸时段无时刻**：如「明早开会」；写成「明早九点」即可。
-
-副作用：标题含这些字样的正常任务也会整体弃权（如「买每日坚果」）。弃权是安全侧。
-
-## ☁️ 可选云端识别
-
-云端识别是本地规则之外的**可选增强，默认关闭**。九成以上输入由本地规则直接
-处理，不会联网；只有规则判断为“写法不认识”时，才可能使用云端兜底。重复任务、
-没有时间表达、只有模糊时段、多个候选或非法日期等本地已经能定论的输入不会发送
-到云端。
-
-开启后，待解析的任务文本会发送到用户配置的第三方服务器，默认服务为
-DeepSeek。主界面的云朵按钮可随时进入设置并关闭该能力。网络请求失败、服务异常
-或响应不符合契约时，任务仍会按原文保存，只是不设置截止时间。
-
-API Key 使用系统 Keystore/Keychain（`flutter_secure_storage`）保存，不写入
-`SharedPreferences`，日志和调试文本也只显示脱敏信息。任务列表本身仍只保存在
-本地，不做云同步。
-
-## 🧱 架构
-
-`lib/` 按职责分层：
-
-```
-models/    状态与业务事实：TodoModel（ChangeNotifier）、Task 等；业务判断写成 getter
-services/  存储与系统能力：TaskStorage、ReminderService、TaskNotificationScheduler
-pages/     页面组装：todo_page、统计页
-widgets/   纯展示 StatelessWidget：TaskTile、TaskInputBar 等
-utils/     无状态格式化与解析：自然语言日期解析器、日期格式
-```
-
-状态管理用 Provider（`MultiProvider` 挂 `TodoModel` 与 `ReminderService`）：`build` 里用 `context.watch`，回调里用 `context.read`。
-
-约定：派生数据（排序、筛选、统计）生成副本，不改原始 `_tasks`；同一条业务判断只写一处；异步安全用 `mounted` / `_isDisposed` 守卫；`Timer` 在 `dispose` 里 cancel。
-
-## 🗃️ 数据结构
-
-```dart
-class Task {
-  final String id;          // 微秒时间戳 + 递增序号，保证唯一
-  String title;
-  bool isDone;
-  DateTime? dueDate;        // 以 UTC ISO8601 字符串持久化
-  DateTime? completedAt;    // 完成时间（UTC），用于统计趋势
-  bool reminderEnabled;     // 是否开启到期提醒
-}
-```
-
-时间统一**以 UTC 存储**，读取和展示时转回设备本地时区，避免跨时区错乱。`Task.toJson()` / `fromJson()` 负责与 JSON 的互转。
-
-## 💾 本地持久化
-
-使用 [`shared_preferences`](https://pub.dev/packages/shared_preferences)：
-
-- `tasks`：任务数组编码后的 JSON 字符串
-- `task_sort_order`：`added` / `dueDate` / `completion`
-- `task_sort_ascending`：`true` 升序 / `false` 降序
-- 回收站(近 7 天已删除任务)一并本地保存
-- `TaskStorage` 独占全部 `shared_preferences` 访问、JSON 编解码、旧数据迁移；页面只消费快照
-
-数据保存在当前设备本地，**不做云同步**：不同设备不共享；卸载 App / 清除应用数据 / 清除浏览器站点数据会丢失本地任务。
-
-### 向后兼容迁移
-
-改数据结构时始终确认「旧设备上的老数据新代码读得动吗」。当前加载逻辑兼容：
-
-- 早期直接保存的 `List<String>`，读取后转 `Task`
-- 只有 `title`/`isDone`、没有 `id` 的旧任务，自动补 ID
-- 没有 `dueDate` / `completedAt` / `reminderEnabled` 的既有任务，安全默认
-- 旧的本地时间截止日期迁移为 UTC
-- 无效日期字符串安全降级为 `null`，不崩溃
-- 空/重复 ID 修复，保证 `Dismissible` key 唯一
-- 损坏、缺标题的记录跳过；JSON 根节点异常不崩溃
-- 旧格式读取后立即以当前结构写回，完成迁移
-
-## ⏰ 到期提醒
-
-`ReminderService` 作为**观察者**监听 `TodoModel`，任务变化时自动对账系统通知队列（`flutter_local_notifications`）：
-
-- 资格规则：已开启提醒 + 未完成 + 有截止时间 + 时间未过
-- 用 **single-flight** 合并高频触发的对账请求，避免并发
-- 监听 App 生命周期，回前台时强制对账（覆盖系统设置/时区等外部变化）
-- 权限被拒时任务照常保存，仅关闭提醒并可引导去系统设置
-
-平台差异：Android / iOS / macOS 支持本地通知；不支持的平台自动隐藏提醒入口。
-
-## 📊 完成统计
-
-统计页展示任务完成率和最近 7 天完成趋势。趋势按 `completedAt`（UTC）转本地时区后归入自然日。注：统计功能上线前完成的任务没有完成时间，计入完成率但不计入趋势。
-
-## 🧪 测试
-
-- `flutter test`：单元 + Widget 测试覆盖持久化、迁移、排序、提醒资格、统计、自然语言解析等
-- 关键逻辑辅以**变异测试**（故意植入 bug，测试必须变红）验证测试有效性
-- 时区敏感逻辑的用例明确构造跨日场景，避免「假通过」
-
-## 🚀 运行
+- Flutter SDK（项目当前使用 Dart `^3.12.2`）
+- 对应平台的 Flutter 开发环境
+- macOS 构建额外需要 Xcode 和 CocoaPods
 
 ```bash
+git clone https://github.com/yaohl74-droid/flutter_todo.git
+cd flutter_todo
 flutter pub get
-flutter run                 # 连接设备/模拟器
-flutter run -d chrome       # Web
-flutter run -d macos        # macOS 本机 Debug
-flutter build macos --debug # macOS Debug 应用
-flutter build apk --release # Android 发布包
+flutter run
 ```
 
-### macOS 构建与 Keychain
+常用命令：
 
-macOS 版使用 `flutter_secure_storage` 把 API Key 写入系统 Keychain。当前依赖的
-`flutter_secure_storage_macos` 尚不支持 Swift Package Manager，因此即使 Flutter
-工程启用了 SPM，macOS 构建仍必须安装 CocoaPods：
+```bash
+flutter run -d macos
+flutter run -d chrome
+flutter build macos --debug
+flutter build apk --release
+```
+
+## 中文时间解析
+
+提交任务时，解析器会移除识别出的时间词，只把正文保留为标题。
+
+| 类型 | 示例 |
+|---|---|
+| 相对日期 | 今天、明天、后天、大后天、3 天后、三天后 |
+| 星期 | 周一、这周五、下周三、下个礼拜三 |
+| 绝对日期 | 3 月 5 日、三月一号、2027 年 3 月 3 日 |
+| 时间 | 上午 9 点、下午 3 点、15:00、15 点 30 |
+| 口语时间 | 九点半、两点一刻、晚上八点三刻 |
+| 日期与时间 | 明早九点、今晚 8 点、下周一上午 9 点 30 分 |
+
+核心规则：
+
+- 只有日期时，截止时间默认为当天 `23:59`。
+- 只有时间且今天已经过去时，顺延到明天；明确写“今天”时允许得到过去时间。
+- 未写年份的月日优先取今年；若对应时刻已过，则顺延到明年。
+- 裸周几取最近一个尚未过去的日期；“下周”按下一个自然周计算。
+- 手动选择的日期时间优先于自然语言结果，但时间词仍会从标题中移除。
+- 多个日期/时间候选、非法日期、重复任务和模糊表达不会被勉强猜测。
+
+目前故意不解析：
+
+- 重复计划：每天、每周一、每月等
+- 模糊时段：明早开会、月底交付等没有精确时刻的写法
+- 周/月粒度偏移：两周后、三个月后
+- 多个相互竞争的日期或时间
+
+无法解析时，任务仍会按原文保存为无期限任务，不会丢失输入。
+
+## 可选云端识别
+
+点击主界面右上角的云朵进入设置。云端能力默认关闭，需要用户主动配置：
+
+- API Key
+- Base URL
+- Model
+
+默认 Base URL 为 `https://api.deepseek.com`。请求使用
+`{Base URL}/chat/completions`，因此也可连接其他兼容 OpenAI Chat Completions
+格式的服务。
+
+云端调用遵循以下边界：
+
+1. 本地能解析的输入不会联网。
+2. 重复任务、非法日期、多个候选等本地已经能拒绝的输入不会联网。
+3. 只有本地规则确实不认识的写法，且云端功能已启用时，才发送该条任务文本。
+4. 超时、认证失败、限流、服务异常或响应不合规时，原任务照常保存。
+5. API Key 使用 `flutter_secure_storage`；日志不会打印密钥。
+
+任务列表不会发送到云端，也没有账号体系或跨设备同步。
+
+## macOS：构建、签名与 Keychain
+
+macOS 版需要 CocoaPods，因为当前 `flutter_secure_storage_macos` 尚未支持 Swift
+Package Manager：
 
 ```bash
 brew install cocoapods
@@ -177,42 +114,121 @@ flutter build macos --debug
 open build/macos/Build/Products/Debug/my_todo.app
 ```
 
-首次执行时 Flutter 会自动运行 `pod install`。如果看到
-`flutter_secure_storage_macos does not support Swift Package Manager`，它是说明
-为什么需要 CocoaPods 的提示；缺少 `pod` 才会令构建终止。`pod install` 还可能改动
-Xcode project、workspace 或生成 `Podfile.lock`，提交前应检查 `git diff`，避免把纯
-本机构建产物混进功能提交。
+构建日志中的以下内容目前只是兼容性提示：
 
-Keychain 与代码签名有一组容易混淆的限制。macOS 上
-`flutter_secure_storage` 即使运行在非沙盒应用中，也必须声明有效的
-`keychain-access-groups`；漏掉时写入会报
-`-34018 errSecMissingEntitlement`，设置页表现为“保存失败，请重试”。
+```text
+flutter_secure_storage_macos does not support Swift Package Manager
+```
 
-本仓库的 Debug 和 Release entitlement 都保留 App Sandbox，并声明：
+### 首次签名配置
 
-- `keychain-access-groups`：
-  `$(AppIdentifierPrefix)$(CFBundleIdentifier)`，用于 Keychain 写入；
-- `com.apple.security.network.client`：用于调用云端 API。
+Keychain access group 必须由真实 Apple 开发团队签名。免费 Apple ID 的 Personal
+Team 足够本机开发：
 
-`$(AppIdentifierPrefix)` 必须由真实开发者团队解析，因此 macOS 构建前需要在
-Xcode 中配置签名：
+1. 打开 `macos/Runner.xcworkspace`，不要只打开 `.xcodeproj`。
+2. 在 **Xcode → Settings → Accounts** 登录 Apple ID。
+3. 选择 **Runner → TARGETS / Runner → Signing & Capabilities**。
+4. 勾选 **Automatically manage signing**。
+5. 在 **Team** 中选择自己的 Personal Team。
+6. 如果 Bundle Identifier 被占用，改成自己长期使用的唯一反向域名标识。
 
-1. 打开 `macos/Runner.xcworkspace`；
-2. 选择 **Runner → TARGETS/Runner → Signing & Capabilities**；
-3. 勾选 **Automatically manage signing**；
-4. 在 **Team** 中选择自己的 Apple ID；免费账号的 Personal Team 足够本地开发。
+本项目的 macOS Bundle Identifier 当前为：
 
-没有 Team 时会两头受阻：
+```text
+com.jideadmin.myTodo
+```
 
-- 保留 Keychain entitlement：构建报
-  `"Runner" has entitlements that require signing with a development certificate"`；
-- 删除 entitlement：应用可以启动，但保存 SK 时会报 `-34018`。
+Bundle Identifier 是应用身份的一部分。发布或开始保存正式数据后不要随意修改，
+否则系统会把它视为另一个应用，原有 Keychain 项和本地数据也不会自动迁移。
 
-不要为绕过签名把 API Key 降级存入 `SharedPreferences`。Xcode 可能把个人
-`DEVELOPMENT_TEAM` 写进 `project.pbxproj`；公开仓库或多人协作时，应在提交前确认
-是否改用本地配置，避免把个人 Team ID 硬编码进版本库。
+### 常见错误
 
-修改 macOS entitlement 后至少运行：
+#### Entitlements require signing
+
+```text
+"Runner" has entitlements that require signing with a development certificate
+```
+
+Runner 没有可用的开发团队或 Apple Development 证书。按上面的首次签名步骤配置，
+不要通过删除 `keychain-access-groups` 来绕过。
+
+#### Failed Registering Bundle Identifier
+
+```text
+Failed Registering Bundle Identifier
+No profiles were found
+```
+
+当前 Bundle Identifier 已被其他开发者注册。换成自己的唯一标识，等待 Xcode 自动
+生成 provisioning profile。
+
+#### 保存云端设置时报 `-34018`
+
+```text
+errSecMissingEntitlement
+```
+
+应用没有带有效 Keychain entitlement 运行。确认：
+
+- Runner 选择了正确的 Team；
+- Debug/Release entitlement 都包含
+  `$(AppIdentifierPrefix)$(CFBundleIdentifier)`；
+- 启动的是重新构建后的 `.app`。
+
+本仓库同时声明 `com.apple.security.network.client`，用于沙盒内的出站 API 请求。
+不要把 API Key 降级保存到 `SharedPreferences`。
+
+> Xcode 可能把个人 `DEVELOPMENT_TEAM` 写入 `project.pbxproj`。公开仓库或团队项目
+> 提交前应确认是否接受该配置，或改为本地签名配置。
+
+## 数据与隐私
+
+| 数据 | 存储位置 |
+|---|---|
+| 任务、排序偏好、回收站 | `shared_preferences` |
+| API Key | 系统 Keystore/Keychain |
+| 截止时间、完成时间 | UTC ISO 8601 |
+
+任务数据不做云同步。卸载应用、清除应用数据或清除浏览器站点数据可能导致任务丢失。
+
+读取旧存档时会自动处理：
+
+- 早期的 `List<String>` 任务
+- 缺少 ID、截止时间、完成时间或提醒字段的记录
+- 旧的本地时间格式
+- 空 ID、重复 ID、损坏记录和非法日期
+
+## 架构
+
+```text
+lib/
+├── models/    任务模型、状态与业务规则
+├── services/  持久化、提醒、云端配置与模型接口
+├── pages/     主页面、设置页和统计页
+├── widgets/   可复用展示组件
+└── utils/     自然语言解析与无状态工具
+```
+
+状态管理使用 Provider。`TodoModel` 是任务事实来源，`ReminderService` 观察任务变化
+并对账系统通知。排序、筛选和统计基于副本计算，不改变任务的原始存储顺序。
+
+主要依赖：
+
+- `provider`
+- `shared_preferences`
+- `flutter_secure_storage`
+- `flutter_local_notifications`
+- `timezone`
+- `http`
+
+## 测试与质量检查
+
+```bash
+flutter analyze
+flutter test
+```
+
+修改 macOS entitlement 后额外运行：
 
 ```bash
 plutil -lint macos/Runner/DebugProfile.entitlements \
@@ -221,6 +237,9 @@ flutter test test/macos_entitlements_test.dart
 flutter build macos --debug
 ```
 
-## 📄 许可
+测试覆盖自然语言解析、拒绝原因、云端契约、安全存储、旧数据迁移、排序、提醒资格、
+回收站、统计和主要 Widget 交互。
+
+## 许可证
 
 [MIT](LICENSE) © Mark Yao
